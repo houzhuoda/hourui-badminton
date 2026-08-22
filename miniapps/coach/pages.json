@@ -1,0 +1,24 @@
+{
+  "pages": [
+    { "path": "pages/login/login", "style": { "navigationBarTitleText": "教练登录" } },
+    { "path": "pages/schedule/schedule", "style": { "navigationBarTitleText": "我的课表" } },
+    { "path": "pages/attendance/attendance", "style": { "navigationBarTitleText": "出勤核销" } },
+    { "path": "pages/stats/stats", "style": { "navigationBarTitleText": "我的统计" } },
+    { "path": "pages/sales/create-member", "style": { "navigationBarTitleText": "新建会员" } },
+    { "path": "pages/sales/create-order", "style": { "navigationBarTitleText": "购课开单" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "侯瑞羽毛球-教练端",
+    "navigationBarBackgroundColor": "#722ed1",
+    "backgroundColor": "#f5f5f5"
+  },
+  "tabBar": {
+    "color": "#999",
+    "selectedColor": "#722ed1",
+    "list": [
+      { "pagePath": "pages/schedule/schedule", "text": "课表" },
+      { "pagePath": "pages/stats/stats", "text": "统计" }
+    ]
+  }
+}

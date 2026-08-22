@@ -1,0 +1,30 @@
+{
+  "pages": [
+    { "path": "pages/role-select/role-select", "style": { "navigationBarTitleText": "选择身份", "navigationBarBackgroundColor": "#13c2c2" } },
+    { "path": "pages/login/login", "style": { "navigationBarTitleText": "登录", "navigationBarBackgroundColor": "#13c2c2" } },
+    { "path": "pages/switch-role/switch-role", "style": { "navigationBarTitleText": "切换身份", "navigationBarBackgroundColor": "#13c2c2" } },
+    { "path": "pages/member/assets/assets", "style": { "navigationBarTitleText": "我的资产" } },
+    { "path": "pages/member/booking/booking", "style": { "navigationBarTitleText": "约课" } },
+    { "path": "pages/member/booking/detail", "style": { "navigationBarTitleText": "课次详情" } },
+    { "path": "pages/member/history/history", "style": { "navigationBarTitleText": "消费记录" } },
+    { "path": "pages/member/profile/profile", "style": { "navigationBarTitleText": "我的" } },
+    { "path": "pages/sales/dashboard/dashboard", "style": { "navigationBarTitleText": "工作台" } },
+    { "path": "pages/sales/members/create", "style": { "navigationBarTitleText": "新建会员" } },
+    { "path": "pages/sales/members/detail", "style": { "navigationBarTitleText": "会员详情" } },
+    { "path": "pages/sales/members/members", "style": { "navigationBarTitleText": "会员管理" } },
+    { "path": "pages/sales/orders/create", "style": { "navigationBarTitleText": "购课开单" } },
+    { "path": "pages/sales/orders/list", "style": { "navigationBarTitleText": "订单列表" } },
+    { "path": "pages/sales/performance/performance", "style": { "navigationBarTitleText": "我的业绩" } },
+    { "path": "pages/coach/attendance/attendance", "style": { "navigationBarTitleText": "出勤核销" } },
+    { "path": "pages/coach/sales/create-member", "style": { "navigationBarTitleText": "新建会员" } },
+    { "path": "pages/coach/sales/create-order", "style": { "navigationBarTitleText": "购课开单" } },
+    { "path": "pages/coach/schedule/schedule", "style": { "navigationBarTitleText": "我的课表" } },
+    { "path": "pages/coach/stats/stats", "style": { "navigationBarTitleText": "我的统计" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "侯瑞羽毛球",
+    "navigationBarBackgroundColor": "#13c2c2",
+    "backgroundColor": "#f5f5f5"
+  }
+}

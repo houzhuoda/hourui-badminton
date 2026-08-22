@@ -1,0 +1,22 @@
+{
+  "name": "hourui-badminton-system",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:admin": "cd admin && npm run dev",
+    "test:backend": "cd backend && npm test",
+    "test:all": "npm run test:backend",
+    "build:admin": "cd admin && npm run build",
+    "seed": "cd backend && npm run seed"
+  },
+  "workspaces": [
+    "backend",
+    "admin",
+    "shared",
+    "miniapps/sales",
+    "miniapps/coach",
+    "miniapps/member"
+  ]
+}

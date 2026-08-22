@@ -1,0 +1,26 @@
+{
+  "pages": [
+    { "path": "pages/login/login", "style": { "navigationBarTitleText": "会员登录" } },
+    { "path": "pages/assets/assets", "style": { "navigationBarTitleText": "我的资产" } },
+    { "path": "pages/booking/booking", "style": { "navigationBarTitleText": "约课" } },
+    { "path": "pages/booking/detail", "style": { "navigationBarTitleText": "课次详情" } },
+    { "path": "pages/history/history", "style": { "navigationBarTitleText": "消费记录" } },
+    { "path": "pages/profile/profile", "style": { "navigationBarTitleText": "我的" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "侯瑞羽毛球",
+    "navigationBarBackgroundColor": "#13c2c2",
+    "backgroundColor": "#f5f5f5"
+  },
+  "tabBar": {
+    "color": "#999",
+    "selectedColor": "#13c2c2",
+    "list": [
+      { "pagePath": "pages/assets/assets", "text": "资产" },
+      { "pagePath": "pages/booking/booking", "text": "约课" },
+      { "pagePath": "pages/history/history", "text": "记录" },
+      { "pagePath": "pages/profile/profile", "text": "我的" }
+    ]
+  }
+}
