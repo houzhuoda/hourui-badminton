@@ -31,6 +31,12 @@ describe('销售管理 API', () => {
     expect(res.body.code).not.toBe(0);
   });
 
+  it('销售手机号不能与已有教练手机号重复', async () => {
+    const res = await request(app).post('/api/sales-admin').set('Authorization', `Bearer ${adminToken}`).send({ name: '冲突销售', phone: '13800000002', password: '123456' });
+    expect(res.body.code).not.toBe(0);
+    expect(res.body.message).toContain('教练');
+  });
+
   it('新增销售缺少字段', async () => {
     const res = await request(app).post('/api/sales-admin').set('Authorization', `Bearer ${adminToken}`).send({ name: '缺字段' });
     expect(res.body.code).not.toBe(0);

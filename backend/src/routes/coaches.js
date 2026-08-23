@@ -55,6 +55,8 @@ router.post('/', authRole(['admin']), (req, res, next) => {
     const db = getDb();
     const exist = db.prepare('SELECT id FROM coaches WHERE phone = ?').get(phone);
     if (exist) throw new BizError('手机号已存在', 409);
+    const salesExist = db.prepare('SELECT id FROM sales WHERE phone = ?').get(phone);
+    if (salesExist) throw new BizError('该手机号已是销售账号，一个人不能同时属于教练和销售两种身份', 409);
     const id = uuid();
     db.prepare(`INSERT INTO coaches (id, phone, password_hash, name, primary_business_type, sales_enabled, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`)
       .run(id, phone, hashPassword(password), name, btValue, salesEnabled ? 1 : 0, now(), now());
@@ -62,13 +64,13 @@ router.post('/', authRole(['admin']), (req, res, next) => {
     if (rates && Array.isArray(rates)) {
       for (const r of rates) {
         if (!BUSINESS_TYPE_CODES.includes(r.businessType)) continue;
-        db.prepare(`INSERT OR IGNORE INTO coach_rates (id, coach_id, business_type, lesson_fee, share_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-          .run(uuid(), id, r.businessType, r.lessonFee || 0, r.shareRate || 0, now(), now());
+        db.prepare(`INSERT OR IGNORE INTO coach_rates (id, coach_id, business_type, lesson_fee, share_rate, gift_commission, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(uuid(), id, r.businessType, r.lessonFee || 0, r.shareRate || 0, r.giftCommission ? 1 : 0, now(), now());
       }
     } else {
       // 默认费率
       for (const bt of BUSINESS_TYPE_CODES) {
-        db.prepare(`INSERT OR IGNORE INTO coach_rates (id, coach_id, business_type, lesson_fee, share_rate, created_at, updated_at) VALUES (?, ?, ?, 0, 0, ?, ?)`)
+        db.prepare(`INSERT OR IGNORE INTO coach_rates (id, coach_id, business_type, lesson_fee, share_rate, gift_commission, created_at, updated_at) VALUES (?, ?, ?, 0, 0, 0, ?, ?)`)
           .run(uuid(), id, bt, now(), now());
       }
     }
@@ -113,9 +115,9 @@ router.put('/:id/rates', authRole(['admin']), (req, res, next) => {
     if (!c) throw new BizError('教练不存在', 404);
     for (const r of rates) {
       if (!BUSINESS_TYPE_CODES.includes(r.businessType)) continue;
-      db.prepare(`INSERT INTO coach_rates (id, coach_id, business_type, lesson_fee, share_rate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(coach_id, business_type) DO UPDATE SET lesson_fee = excluded.lesson_fee, share_rate = excluded.share_rate, updated_at = excluded.updated_at`)
-        .run(uuid(), c.id, r.businessType, r.lessonFee || 0, r.shareRate || 0, now(), now());
+      db.prepare(`INSERT INTO coach_rates (id, coach_id, business_type, lesson_fee, share_rate, gift_commission, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(coach_id, business_type) DO UPDATE SET lesson_fee = excluded.lesson_fee, share_rate = excluded.share_rate, gift_commission = excluded.gift_commission, updated_at = excluded.updated_at`)
+        .run(uuid(), c.id, r.businessType, r.lessonFee || 0, r.shareRate || 0, r.giftCommission ? 1 : 0, now(), now());
     }
     writeAudit({ entity: 'coach', entityId: c.id, action: AUDIT_ACTIONS.UPDATE, operator: operatorFromReq(req), detail: { rates } });
     res.json(success(db.prepare('SELECT * FROM coach_rates WHERE coach_id = ?').all(c.id)));

@@ -67,9 +67,11 @@ export function formatDate(date) {
   return d.toISOString().slice(0, 10);
 }
 
-// 当前时间 ISO
+// 当前时间 YYYY-MM-DD HH:MM:SS（统一用空格分隔，与查询条件一致）
 export function now() {
-  return new Date().toISOString();
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // 加 N 天
@@ -121,8 +123,8 @@ export function success(data, message = 'ok') {
   return { code: 0, data, message };
 }
 
-export function fail(message, code = 1) {
-  return { code, data: null, message };
+export function fail(message, code = 1, data = null) {
+  return { code, data, message };
 }
 
 // 密码哈希（bcryptjs 同步接口）
@@ -132,4 +134,16 @@ export function hashPassword(plain) {
 }
 export function verifyPassword(plain, hash) {
   return bcrypt.compareSync(plain, hash);
+}
+
+// 根据当前用户解析会员 ID（支持 member/sales/coach 角色访问会员端数据）
+// 需要 getDb 传入以避免循环依赖
+export function resolveMemberId(req, db) {
+  if (req.user.role === 'member') return req.user.memberId || req.user.id;
+  // sales/coach 通过手机号查找对应会员
+  const phone = req.user.phone;
+  if (!phone) return null;
+  const member = db.prepare('SELECT id FROM members WHERE phone = ? AND status = ?').get(encryptPhone(phone), 'ACTIVE')
+    || db.prepare('SELECT id FROM members WHERE phone = ? AND status = ?').get(phone, 'ACTIVE');
+  return member ? member.id : null;
 }

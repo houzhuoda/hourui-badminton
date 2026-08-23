@@ -29,11 +29,12 @@ export function createMember(data, operator) {
 
   const member = db.transaction(() => {
     db.prepare(`
-      INSERT INTO members (id, name, phone, phone_hash, gender, birth_date, status, creator_id, creator_type, creator_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
+      INSERT INTO members (id, name, phone, phone_hash, gender, birth_date, status, creator_id, creator_type, creator_name, channel_id, sub_channel_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, name, encryptedPhone, phoneH, gender || 'U', birthDate || null,
       operator?.id || null, operator?.type || null, operator?.name || null,
+      channelId || null, subChannelId || null,
       now(), now()
     );
 
@@ -118,14 +119,24 @@ export function listMembers(query) {
   const params = [];
 
   if (query.keyword) {
-    // 如果是纯数字，按手机号精确匹配（通过 hash）
-    if (/^\d+$/.test(query.keyword)) {
-      where.push(`m.phone_hash = ?`);
-      params.push(hashPhone(query.keyword));
-    } else {
-      where.push(`m.name LIKE ?`);
-      params.push(`%${query.keyword}%`);
+    const kw = query.keyword;
+    // 姓名模糊匹配
+    const conditions = [`m.name LIKE ?`];
+    const kwParams = [`%${kw}%`];
+    // 电话包含匹配（解密后比对，限制扫描数量）
+    const baseWhere = where.join(' AND ');
+    const baseParams = [...params];
+    const phoneRows = db.prepare(`SELECT m.id, m.phone FROM members m WHERE ${baseWhere} ORDER BY m.created_at DESC LIMIT 1000`).all(...baseParams);
+    const matchingIds = phoneRows.filter((r) => {
+      const phone = decryptPhone(r.phone);
+      return phone && phone.includes(kw);
+    }).map((r) => r.id);
+    if (matchingIds.length > 0) {
+      conditions.push(`m.id IN (${matchingIds.map(() => '?').join(',')})`);
+      kwParams.push(...matchingIds);
     }
+    where.push(`(${conditions.join(' OR ')})`);
+    params.push(...kwParams);
   }
   if (query.status) {
     where.push(`m.status = ?`);
@@ -182,7 +193,6 @@ export function getMemberDetail(id) {
   if (!m) throw new BizError('会员不存在', 404);
 
   const tags = db.prepare('SELECT category_code, source, created_at FROM member_tags WHERE member_id = ?').all(id);
-  const prepaid = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(id);
   const packs = db.prepare(`
     SELECT p.*, c.name as course_name 
     FROM packs p LEFT JOIN courses c ON p.course_id = c.id 
@@ -235,9 +245,6 @@ export function getMemberDetail(id) {
       alerts.push({ type: 'PACK_EXPIRED', packId: p.id, message: `课包 ${p.course_name || ''} 已到期` });
     }
   }
-  if (prepaid && prepaid.total_balance < 100) {
-    alerts.push({ type: 'LOW_BALANCE', message: `预存余额不足（剩余 ${prepaid.total_balance} 元）` });
-  }
 
   return {
     ...m,
@@ -246,7 +253,6 @@ export function getMemberDetail(id) {
     tagDetails: tags,
     tagHistory,
     channel: channelInfo,
-    prepaid: prepaid || { principal_balance: 0, gift_balance: 0, total_balance: 0 },
     packs,
     orders,
     consumptions,

@@ -14,6 +14,10 @@ export default function MemberDetail() {
   const [loading, setLoading] = useState(true);
   const [tagModal, setTagModal] = useState(false);
   const [tagForm] = Form.useForm();
+  const [phoneModal, setPhoneModal] = useState(false);
+  const [phoneForm] = Form.useForm();
+  const [realPhone, setRealPhone] = useState(null);
+  const [phoneLoading, setPhoneLoading] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -45,6 +49,19 @@ export default function MemberDetail() {
     } catch (e) { if (e.message) message.error(e.message); }
   };
 
+  const handleViewPhone = async () => {
+    try {
+      const values = await phoneForm.validateFields();
+      setPhoneLoading(true);
+      const d = await api.post(`/members/${id}/view-phone`, { adminPassword: values.adminPassword });
+      setRealPhone(d.phone);
+      setPhoneLoading(false);
+    } catch (e) {
+      setPhoneLoading(false);
+      if (e.message) message.error(e.message);
+    }
+  };
+
   if (!data) return <div className="page-container">加载中...</div>;
 
   return (
@@ -68,7 +85,12 @@ export default function MemberDetail() {
       <Card className="mb-16">
         <Descriptions title="基本信息" column={3}>
           <Descriptions.Item label="姓名">{data.name}</Descriptions.Item>
-          <Descriptions.Item label="手机号">{data.phone}</Descriptions.Item>
+          <Descriptions.Item label="手机号">
+            {realPhone || data.phone}
+            <Button size="small" type="link" onClick={() => { if (realPhone) { setRealPhone(null); } else { setRealPhone(null); setPhoneModal(true); } }} style={{ marginLeft: 8, padding: 0 }}>
+              {realPhone ? '隐藏' : '查看电话'}
+            </Button>
+          </Descriptions.Item>
           <Descriptions.Item label="性别">{data.gender}</Descriptions.Item>
           <Descriptions.Item label="出生年月">{data.birth_date || '-'}</Descriptions.Item>
           <Descriptions.Item label="状态"><Tag color={data.status === 'ACTIVE' ? 'green' : 'red'}>{MEMBER_STATUS[data.status]}</Tag></Descriptions.Item>
@@ -84,13 +106,6 @@ export default function MemberDetail() {
 
       <Card>
         <Tabs items={[
-          { key: 'prepaid', label: '预存账户', children: (
-            <Descriptions column={3}>
-              <Descriptions.Item label="本金余额">￥{data.prepaid.principal_balance}</Descriptions.Item>
-              <Descriptions.Item label="赠送余额">￥{data.prepaid.gift_balance}</Descriptions.Item>
-              <Descriptions.Item label="可用余额">￥{data.prepaid.total_balance}</Descriptions.Item>
-            </Descriptions>
-          )},
           { key: 'packs', label: '课包列表', children: (
             <Table dataSource={data.packs} rowKey="id" size="small" pagination={false} columns={[
               { title: '课程', dataIndex: 'course_name', key: 'course_name' },
@@ -143,6 +158,23 @@ export default function MemberDetail() {
           </Form.Item>
           <Form.Item name="reason" label="原因"><Input /></Form.Item>
         </Form>
+      </Modal>
+
+      <Modal title="查看会员电话" open={phoneModal}
+        onOk={realPhone ? () => { setPhoneModal(false); phoneForm.resetFields(); } : handleViewPhone}
+        onCancel={() => { setPhoneModal(false); phoneForm.resetFields(); setRealPhone(null); }}
+        okText={realPhone ? '确定' : '确认查看'}
+        confirmLoading={phoneLoading}
+      >
+        {realPhone ? (
+          <Alert type="success" message={`完整手机号：${realPhone}`} description="请妥善保护会员隐私信息" showIcon />
+        ) : (
+          <Form form={phoneForm} layout="vertical">
+            <Form.Item name="adminPassword" label="管理员密码" rules={[{ required: true, message: '请输入管理员密码' }]}>
+              <Input.Password placeholder="请输入管理员密码" autoFocus />
+            </Form.Item>
+          </Form>
+        )}
       </Modal>
     </div>
   );

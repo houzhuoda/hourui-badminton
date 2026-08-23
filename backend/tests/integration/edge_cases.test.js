@@ -200,14 +200,14 @@ describe('订单边界', () => {
   it('不存在的会员', async () => {
     const res = await request(app).post('/api/orders')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ memberId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true });
+      .send({ memberId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', confirmed: true });
     expect(res.body.code).not.toBe(0);
   });
 
   it('大额订单需二次确认', async () => {
     const res = await request(app).post('/api/orders')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ memberId, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000 });
+      .send({ memberId, businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', sessions: 10, price: 5000 });
     expect(res.body.data.needConfirm).toBe(true);
   });
 

@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS coach_rates (
   business_type TEXT NOT NULL,
   lesson_fee INTEGER DEFAULT 0,     -- 课时费（元/节）
   share_rate INTEGER DEFAULT 0,     -- 分成比例（百分比）
+  gift_commission INTEGER DEFAULT 0,-- 赠送课程是否提成（0=不提成 1=提成）
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE(coach_id, business_type),
@@ -93,6 +94,8 @@ CREATE TABLE IF NOT EXISTS members (
   creator_id TEXT,                  -- 建档人 id
   creator_type TEXT,                -- sales / coach / admin
   creator_name TEXT,                -- 冗余建档人姓名
+  channel_id TEXT,                  -- 一级渠道
+  sub_channel_id TEXT,              -- 二级渠道
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -156,7 +159,9 @@ CREATE TABLE IF NOT EXISTS course_session_pricing (
   course_id TEXT NOT NULL,
   sessions INTEGER NOT NULL,        -- 购买节数
   price INTEGER NOT NULL,           -- 价格
-  gift_sessions INTEGER DEFAULT 0,  -- 赠送节数
+  gift_sessions INTEGER DEFAULT 0,  -- 赠送节数（同业务类型）
+  extra_gift_business_type TEXT,    -- 额外赠送业务类型（如买私教送陪练）
+  extra_gift_sessions INTEGER DEFAULT 0, -- 额外赠送节数
   sort_order INTEGER DEFAULT 0,
   status TEXT DEFAULT 'ACTIVE',
   created_at TEXT DEFAULT (datetime('now')),
@@ -171,22 +176,13 @@ CREATE TABLE IF NOT EXISTS course_monthly_pricing (
   monthly_fee INTEGER NOT NULL,     -- 月费
   weekly_frequency INTEGER NOT NULL,-- 周频次
   monthly_quota INTEGER NOT NULL,   -- 月额度次数
+  extra_gift_business_type TEXT,    -- 额外赠送业务类型（如买私教月卡送陪练次卡）
+  extra_gift_sessions INTEGER DEFAULT 0, -- 额外赠送节数
   sort_order INTEGER DEFAULT 0,
   status TEXT DEFAULT 'ACTIVE',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (course_id) REFERENCES courses(id)
-);
-
--- 预存赠送规则（多档，Q-05 配置项之一）
-CREATE TABLE IF NOT EXISTS prepaid_rules (
-  id TEXT PRIMARY KEY,
-  deposit_amount INTEGER NOT NULL,  -- 预存金额
-  gift_amount INTEGER NOT NULL,     -- 赠送金额
-  sort_order INTEGER DEFAULT 0,
-  status TEXT DEFAULT 'ACTIVE',
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 -- 折扣规则
@@ -294,40 +290,10 @@ CREATE TABLE IF NOT EXISTS packs (
   FOREIGN KEY (order_id) REFERENCES orders(id)
 );
 
--- ============ 预存账户 ============
-CREATE TABLE IF NOT EXISTS prepaid_accounts (
-  id TEXT PRIMARY KEY,
-  member_id TEXT UNIQUE NOT NULL,
-  principal_balance INTEGER DEFAULT 0,  -- 本金余额
-  gift_balance INTEGER DEFAULT 0,       -- 赠送余额
-  total_balance INTEGER DEFAULT 0,      -- 可用余额（本金+赠送）
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (member_id) REFERENCES members(id)
-);
-
--- 预存账户流水
-CREATE TABLE IF NOT EXISTS prepaid_transactions (
-  id TEXT PRIMARY KEY,
-  account_id TEXT NOT NULL,
-  member_id TEXT NOT NULL,
-  order_id TEXT,
-  session_id TEXT,
-  type TEXT NOT NULL,               -- DEPOSIT / CONSUME / REFUND
-  principal_delta INTEGER DEFAULT 0, -- 本金变动（正为入账，负为扣减）
-  gift_delta INTEGER DEFAULT 0,     -- 赠送变动
-  amount INTEGER DEFAULT 0,         -- 总金额（用于展示）
-  balance_after INTEGER DEFAULT 0,  -- 操作后总余额
-  note TEXT,
-  created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (account_id) REFERENCES prepaid_accounts(id),
-  FOREIGN KEY (member_id) REFERENCES members(id)
-);
-
 -- ============ 核销记录（课包扣减） ============
 CREATE TABLE IF NOT EXISTS pack_consumptions (
   id TEXT PRIMARY KEY,
-  pack_id TEXT NOT NULL,
+  pack_id TEXT,                       -- 课包ID（预存模式为NULL）
   member_id TEXT NOT NULL,
   session_id TEXT,
   order_id TEXT,
@@ -400,6 +366,7 @@ CREATE TABLE IF NOT EXISTS commission_records (
   rate INTEGER DEFAULT 0,
   amount INTEGER DEFAULT 0,
   status TEXT DEFAULT 'ACTIVE',     -- ACTIVE / REVERSED（退款回滚）
+  session_id TEXT,                  -- 关联课次（课后计提模式）
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (order_id) REFERENCES orders(id)
 );
@@ -414,10 +381,11 @@ CREATE TABLE IF NOT EXISTS bookings (
   cancel_reason TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
-  UNIQUE(session_id, member_id),
   FOREIGN KEY (session_id) REFERENCES sessions(id),
   FOREIGN KEY (member_id) REFERENCES members(id)
 );
+-- 仅对未取消的预约做唯一约束（允许取消后重新预约）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_active_unique ON bookings(session_id, member_id) WHERE status IN ('BOOKED', 'ATTENDED');
 
 -- ============ 审计日志 ============
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -439,6 +407,9 @@ CREATE TABLE IF NOT EXISTS member_end_config (
   noshow_action TEXT DEFAULT 'RECORD_ONLY', -- RECORD_ONLY / DEDUCT
   booking_open_default INTEGER DEFAULT 0,
   expiry_remind_days INTEGER DEFAULT 7,
+  service_wechat TEXT DEFAULT '',           -- 客服微信号（约课无权益时引导添加）
+  service_wechat_qr TEXT DEFAULT '',        -- 客服微信二维码图片URL
+  service_phone TEXT DEFAULT '',            -- 客服电话
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -490,6 +461,20 @@ CREATE TABLE IF NOT EXISTS coach_time_off (
   FOREIGN KEY (coach_id) REFERENCES coaches(id)
 );
 
+-- ============ 教练特定日期排班（覆盖模板） ============
+CREATE TABLE IF NOT EXISTS coach_date_slots (
+  id TEXT PRIMARY KEY,
+  coach_id TEXT NOT NULL,
+  date TEXT NOT NULL,                    -- 日期 YYYY-MM-DD
+  start_hour INTEGER NOT NULL,           -- 开始小时 0-23
+  end_hour INTEGER NOT NULL,             -- 结束小时 1-24
+  status TEXT NOT NULL DEFAULT 'AVAILABLE', -- AVAILABLE / REST
+  business_types TEXT DEFAULT 'PRIVATE,PRACTICE',
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(coach_id, date, start_hour),
+  FOREIGN KEY (coach_id) REFERENCES coaches(id)
+);
+
 -- ============ 私教/陪练预约记录 ============
 CREATE TABLE IF NOT EXISTS private_bookings (
   id TEXT PRIMARY KEY,
@@ -504,13 +489,15 @@ CREATE TABLE IF NOT EXISTS private_bookings (
   cancel_reason TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
-  UNIQUE(coach_id, date, start_time),    -- 同一教练同一时段只能约1人
   FOREIGN KEY (coach_id) REFERENCES coaches(id),
   FOREIGN KEY (member_id) REFERENCES members(id)
 );
+-- 仅对未取消的私教/陪练预约做唯一约束（允许取消后重新预约）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_private_bookings_active_unique ON private_bookings(coach_id, date, start_time) WHERE status IN ('BOOKED', 'COMPLETED');
 
 CREATE INDEX IF NOT EXISTS idx_coach_avail_coach ON coach_availability_templates(coach_id);
 CREATE INDEX IF NOT EXISTS idx_coach_timeoff_coach ON coach_time_off(coach_id, date);
+CREATE INDEX IF NOT EXISTS idx_coach_date_slots_coach ON coach_date_slots(coach_id, date);
 CREATE INDEX IF NOT EXISTS idx_private_bookings_coach ON private_bookings(coach_id, date);
 CREATE INDEX IF NOT EXISTS idx_private_bookings_member ON private_bookings(member_id);
 `;

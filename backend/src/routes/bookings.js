@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { authRole } from '../middleware/auth.js';
-import { success, uuid, now } from '../utils/helpers.js';
+import { success, uuid, now, resolveMemberId } from '../utils/helpers.js';
 import { writeAudit, operatorFromReq } from '../services/audit.js';
 import { BOOKING_STATUS, DEFAULTS, AUDIT_ACTIONS } from '../../../shared/constants.js';
 import { BizError } from '../middleware/error.js';
@@ -13,10 +13,11 @@ const router = Router();
 router.get('/available', authRole(['member']), (req, res, next) => {
   try {
     const db = getDb();
-    const { businessType, date } = req.query;
+    const { businessType, date, courseId } = req.query;
     const where = [`s.status = 'SCHEDULED'`, `s.booking_open = 1`, `s.date >= date('now')`];
     const params = [];
     if (businessType) { where.push('s.business_type = ?'); params.push(businessType); }
+    if (courseId) { where.push('s.course_id = ?'); params.push(courseId); }
     if (date) { where.push('s.date = ?'); params.push(date); }
     const whereSql = where.join(' AND ');
     const list = db.prepare(`
@@ -51,13 +52,43 @@ router.post('/', authRole(['member']), (req, res, next) => {
     const exist = db.prepare("SELECT id FROM bookings WHERE session_id = ? AND member_id = ? AND status IN ('BOOKED', 'ATTENDED')").get(sessionId, req.user.memberId);
     if (exist) throw new BizError('已预约该课次', 409);
 
+    // 权益检查：会员是否有该业务类型的有效次卡/月卡
+    const memberId = req.user.memberId;
+    const businessType = session.business_type;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    // 查有效次卡/月卡（匹配业务类型或课程）
+    const validPacks = db.prepare(`
+      SELECT * FROM packs WHERE member_id = ? AND status = 'ACTIVE'
+      AND valid_until >= ? AND valid_from <= ?
+    `).all(memberId, todayStr, todayStr);
+
+    const hasMatchingPack = validPacks.some((p) => {
+      if (p.business_type !== businessType) return false;
+      if (p.pack_type === 'SESSION_PACK') return p.remaining_sessions > 0;
+      if (p.pack_type === 'MONTHLY') {
+        // 月卡当月额度刷新
+        if (p.monthly_period !== currentMonth) return p.monthly_quota > 0;
+        return p.monthly_remaining > 0;
+      }
+      if (p.pack_type === 'COMMUNITY_PACK') return p.remaining_sessions > 0;
+      return false;
+    });
+
+    if (!hasMatchingPack) {
+      // 获取客服微信
+      const config = db.prepare('SELECT service_wechat, service_wechat_qr FROM member_end_config LIMIT 1').get();
+      throw new BizError('NO_PACK', 403, { serviceWechat: config?.service_wechat || '', serviceWechatQr: config?.service_wechat_qr || '' });
+    }
+
     db.transaction(() => {
       const id = uuid();
       db.prepare(`INSERT INTO bookings (id, session_id, member_id, status, created_at, updated_at) VALUES (?, ?, ?, 'BOOKED', ?, ?)`)
-        .run(id, sessionId, req.user.memberId, now(), now());
+        .run(id, sessionId, memberId, now(), now());
       db.prepare('UPDATE sessions SET booked_count = booked_count + 1 WHERE id = ?').run(sessionId);
     })();
-    writeAudit({ entity: 'booking', entityId: sessionId, action: AUDIT_ACTIONS.CREATE, operator: operatorFromReq(req), detail: { memberId: req.user.memberId } });
+    writeAudit({ entity: 'booking', entityId: sessionId, action: AUDIT_ACTIONS.CREATE, operator: operatorFromReq(req), detail: { memberId } });
     res.status(201).json(success({ booked: true }));
   } catch (e) { next(e); }
 });
@@ -92,12 +123,14 @@ router.delete('/:id', authRole(['member']), (req, res, next) => {
 });
 
 // 会员端：我的约课记录
-router.get('/mine', authRole(['member']), (req, res, next) => {
+router.get('/mine', authRole(['member', 'sales', 'coach']), (req, res, next) => {
   try {
     const db = getDb();
+    const memberId = resolveMemberId(req, db);
+    if (!memberId) return res.json(success([]));
     const { status } = req.query;
     const where = [`b.member_id = ?`];
-    const params = [req.user.memberId];
+    const params = [memberId];
     if (status) { where.push('b.status = ?'); params.push(status); }
     const whereSql = where.join(' AND ');
     const list = db.prepare(`

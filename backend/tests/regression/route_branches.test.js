@@ -107,21 +107,21 @@ describe('教练路由分支', () => {
 
 describe('订单路由分支', () => {
   it('不存在的会员', async () => {
-    const res = await request(app).post('/api/orders').set('Authorization', `Bearer ${adminToken}`).send({ memberId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true });
+    const res = await request(app).post('/api/orders').set('Authorization', `Bearer ${adminToken}`).send({ memberId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', confirmed: true });
     expect(res.status).toBe(404);
   });
 
   it('已停用会员不能开单', async () => {
     const m = await request(app).post('/api/members').set('Authorization', `Bearer ${adminToken}`).send({ name: '停用', phone: '13900010003', categoryCode: 'M_PRIVATE' });
     await request(app).patch(`/api/members/${m.body.data.id}/status`).set('Authorization', `Bearer ${adminToken}`).send({ status: 'DISABLED' });
-    const res = await request(app).post('/api/orders').set('Authorization', `Bearer ${adminToken}`).send({ memberId: m.body.data.id, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true });
+    const res = await request(app).post('/api/orders').set('Authorization', `Bearer ${adminToken}`).send({ memberId: m.body.data.id, businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', confirmed: true });
     expect(res.body.code).not.toBe(0);
   });
 
   it('课程不存在', async () => {
     const m = await request(app).post('/api/members').set('Authorization', `Bearer ${adminToken}`).send({ name: '课程不存在', phone: '13900010004', categoryCode: 'M_PRIVATE' });
     const res = await request(app).post('/api/orders').set('Authorization', `Bearer ${adminToken}`).send({
-      memberId: m.body.data.id, courseId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true,
+      memberId: m.body.data.id, courseId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', confirmed: true,
     });
     expect(res.body.code).not.toBe(0);
   });

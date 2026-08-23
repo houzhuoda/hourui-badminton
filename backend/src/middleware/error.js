@@ -15,13 +15,14 @@ export function errorHandler(err, req, res, next) {
   if (status >= 500) {
     console.error('[ERROR]', err);
   }
-  res.status(status).json(fail(message, status));
+  res.status(status).json(fail(message, status, err.data));
 }
 
 // 业务错误类
 export class BizError extends Error {
-  constructor(message, status = 400) {
+  constructor(message, status = 400, data = null) {
     super(message);
     this.status = status;
+    this.data = data;
   }
 }

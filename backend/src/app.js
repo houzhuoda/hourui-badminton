@@ -33,10 +33,13 @@ initDb();
 
 const app = express();
 
+// 信任反向代理（nginx），用于正确获取客户端 IP
+app.set('trust proxy', 1);
+
 // 安全与基础中间件
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 if (config.env !== 'test') {
   app.use(morgan('dev'));

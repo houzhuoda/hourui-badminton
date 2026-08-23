@@ -23,7 +23,6 @@ export const BUSINESS_TO_CATEGORY = BUSINESS_TYPES.reduce((m, b) => { m[b.code] 
 export const CATEGORY_TO_BUSINESS = MEMBER_CATEGORIES.reduce((m, c) => { m[c.code] = BUSINESS_TYPES.find(b => b.memberCategory === c.code)?.code; return m; }, {});
 
 export const CHARGE_MODES = [
-  { code: 'PREPAID', name: '预存赠送' },
   { code: 'SESSION_PACK', name: '次卡' },
   { code: 'MONTHLY', name: '月卡' },
   { code: 'SINGLE', name: '单次付费' },

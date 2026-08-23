@@ -69,17 +69,6 @@ export function seed(db) {
       .run(uuid(), coachId, bt);
   }
 
-  // 默认预存赠送规则
-  const prepaidRules = [
-    { deposit: 3000, gift: 1000 },
-    { deposit: 5000, gift: 2000 },
-    { deposit: 10000, gift: 5000 },
-  ];
-  for (const r of prepaidRules) {
-    db.prepare(`INSERT OR IGNORE INTO prepaid_rules (id, deposit_amount, gift_amount, status, sort_order) VALUES (?, ?, ?, 'ACTIVE', ?)`)
-      .run(uuid(), r.deposit, r.gift, r.deposit);
-  }
-
   // 默认课程（每种业务类型一个示例）
   const courses = [
     { name: '私教课', business_type: 'PRIVATE', audience: 'ANY', duration: 60, price: 300 },

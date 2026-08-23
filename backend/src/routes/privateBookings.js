@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import { authRole } from '../middleware/auth.js';
-import { success, uuid, now } from '../utils/helpers.js';
+import { success, uuid, now, resolveMemberId } from '../utils/helpers.js';
 import { writeAudit, operatorFromReq } from '../services/audit.js';
 import { BizError } from '../middleware/error.js';
 
@@ -106,20 +106,45 @@ router.get('/:coachId/available-slots', authRole(['admin', 'coach', 'member']), 
     // 1. 取教练该周几的可用时间模板
     const templates = db.prepare('SELECT * FROM coach_availability_templates WHERE coach_id = ? AND day_of_week = ? AND status = ?')
       .all(coachId, dayOfWeek, 'ACTIVE');
-    if (templates.length === 0) { res.json(success([])); return; }
 
-    // 生成小时段列表
-    const slots = [];
-    for (const t of templates) {
-      // 检查业务类型是否匹配
-      if (businessType && t.business_types && !t.business_types.split(',').includes(businessType)) continue;
-      for (let h = t.start_hour; h < t.end_hour; h++) {
-        slots.push({
-          start_time: `${String(h).padStart(2, '0')}:00`,
-          end_time: `${String(h + 1).padStart(2, '0')}:00`,
-        });
+    // 1b. 取特定日期排班记录
+    const dateSlots = db.prepare('SELECT * FROM coach_date_slots WHERE coach_id = ? AND date = ?').all(coachId, date);
+    const dateAvailHours = new Set();
+    const dateRestHours = new Set();
+    for (const ds of dateSlots) {
+      if (ds.status === 'AVAILABLE') {
+        // 检查业务类型
+        if (businessType && ds.business_types && !ds.business_types.split(',').includes(businessType)) continue;
+        for (let h = ds.start_hour; h < ds.end_hour; h++) dateAvailHours.add(h);
+      } else if (ds.status === 'REST') {
+        for (let h = ds.start_hour; h < ds.end_hour; h++) dateRestHours.add(h);
       }
     }
+
+    // 生成小时段列表（模板 + 日期排班合并）
+    const slots = [];
+    const addedHours = new Set();
+
+    // 从模板生成
+    for (const t of templates) {
+      if (businessType && t.business_types && !t.business_types.split(',').includes(businessType)) continue;
+      for (let h = t.start_hour; h < t.end_hour; h++) {
+        if (addedHours.has(h)) continue;
+        // 如果该小时被日期排班标记为休息，跳过
+        if (dateRestHours.has(h)) continue;
+        addedHours.add(h);
+        slots.push({ start_time: `${String(h).padStart(2, '0')}:00`, end_time: `${String(h + 1).padStart(2, '0')}:00` });
+      }
+    }
+
+    // 从日期排班生成（覆盖模板）
+    for (const h of dateAvailHours) {
+      if (addedHours.has(h)) continue;
+      addedHours.add(h);
+      slots.push({ start_time: `${String(h).padStart(2, '0')}:00`, end_time: `${String(h + 1).padStart(2, '0')}:00` });
+    }
+
+    if (slots.length === 0) { res.json(success([])); return; }
 
     // 2. 排除教练请假时段
     const timeOffs = db.prepare('SELECT * FROM coach_time_off WHERE coach_id = ? AND date = ?').all(coachId, date);
@@ -181,18 +206,37 @@ router.post('/private', authRole(['member']), (req, res, next) => {
     const coach = db.prepare("SELECT id, name FROM coaches WHERE id = ? AND status = 'ACTIVE'").get(coachId);
     if (!coach) throw new BizError('教练不存在或已离职', 404);
 
-    // 检查该时段是否可约（复用上面的逻辑）
+    // 检查该时段是否可约（与 available-slots 逻辑保持一致：模板 + 日期排班）
     const dateObj = new Date(date + 'T00:00:00');
     const dayOfWeek = dateObj.getDay() === 0 ? 7 : dateObj.getDay();
+    const startHour = parseInt(startTime.split(':')[0]);
+    const endHour = parseInt(endTime.split(':')[0]);
+
+    // 1) 检查模板
     const templates = db.prepare('SELECT * FROM coach_availability_templates WHERE coach_id = ? AND day_of_week = ? AND status = ?')
       .all(coachId, dayOfWeek, 'ACTIVE');
     const inTemplate = templates.some((t) => {
       if (businessType && t.business_types && !t.business_types.split(',').includes(businessType)) return false;
-      const startHour = parseInt(startTime.split(':')[0]);
-      const endHour = parseInt(endTime.split(':')[0]);
       return startHour >= t.start_hour && endHour <= t.end_hour;
     });
-    if (!inTemplate) throw new BizError('该时段不在教练可用时间范围内', 400);
+
+    // 2) 检查日期排班（AVAILABLE 状态）
+    const dateSlots = db.prepare('SELECT * FROM coach_date_slots WHERE coach_id = ? AND date = ?').all(coachId, date);
+    const inDateSlot = dateSlots.some((ds) => {
+      if (ds.status !== 'AVAILABLE') return false;
+      if (businessType && ds.business_types && !ds.business_types.split(',').includes(businessType)) return false;
+      return startHour >= ds.start_hour && endHour <= ds.end_hour;
+    });
+
+    // 3) 检查该小时是否被日期排班标记为休息
+    const inRest = dateSlots.some((ds) => {
+      if (ds.status !== 'REST') return false;
+      return startHour >= ds.start_hour && endHour <= ds.end_hour;
+    });
+
+    if (inRest || (!inTemplate && !inDateSlot)) {
+      throw new BizError('该时段不在教练可用时间范围内', 400);
+    }
 
     // 检查请假冲突
     const timeOffConflict = db.prepare(`SELECT 1 FROM coach_time_off WHERE coach_id = ? AND date = ? AND start_time < ? AND end_time > ?`)
@@ -213,6 +257,29 @@ router.post('/private', authRole(['member']), (req, res, next) => {
     const memberConflict = db.prepare(`SELECT 1 FROM private_bookings WHERE member_id = ? AND date = ? AND start_time = ? AND status = 'BOOKED'`)
       .get(memberId, date, startTime);
     if (memberConflict) throw new BizError('您该时段已有预约', 409);
+
+    // 权益检查：会员是否有该业务类型的有效次卡/月卡
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const validPacks = db.prepare(`
+      SELECT * FROM packs WHERE member_id = ? AND status = 'ACTIVE'
+      AND valid_until >= ? AND valid_from <= ?
+    `).all(memberId, todayStr, todayStr);
+
+    const hasMatchingPack = validPacks.some((p) => {
+      if (p.business_type !== businessType) return false;
+      if (p.pack_type === 'SESSION_PACK') return p.remaining_sessions > 0;
+      if (p.pack_type === 'MONTHLY') {
+        if (p.monthly_period !== currentMonth) return p.monthly_quota > 0;
+        return p.monthly_remaining > 0;
+      }
+      return false;
+    });
+
+    if (!hasMatchingPack) {
+      const config = db.prepare('SELECT service_wechat FROM member_end_config LIMIT 1').get();
+      throw new BizError('NO_PACK', 403, { serviceWechat: config?.service_wechat || '' });
+    }
 
     const id = uuid();
     db.prepare(`INSERT INTO private_bookings (id, coach_id, member_id, business_type, date, start_time, end_time, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'BOOKED', ?, ?)`)
@@ -249,16 +316,18 @@ router.delete('/private/:bookingId', authRole(['member', 'admin']), (req, res, n
 });
 
 // 会员的私教/陪练预约列表
-router.get('/private/mine', authRole(['member']), (req, res, next) => {
+router.get('/private/mine', authRole(['member', 'sales', 'coach']), (req, res, next) => {
   try {
     const db = getDb();
+    const memberId = resolveMemberId(req, db);
+    if (!memberId) return res.json(success([]));
     const list = db.prepare(`
       SELECT pb.*, c.name as coach_name
       FROM private_bookings pb
       JOIN coaches c ON pb.coach_id = c.id
       WHERE pb.member_id = ?
       ORDER BY pb.date DESC, pb.start_time DESC
-    `).all(req.user.memberId);
+    `).all(memberId);
     res.json(success(list));
   } catch (e) { next(e); }
 });
@@ -326,6 +395,18 @@ router.get('/:coachId/daily-grid', authRole(['admin', 'coach', 'member']), (req,
       }
     }
 
+    // 1b. 取特定日期排班记录（覆盖模板）
+    const dateSlots = db.prepare('SELECT * FROM coach_date_slots WHERE coach_id = ? AND date = ?').all(coachId, date);
+    const dateAvailableHours = new Set();
+    const dateRestHours = new Set();
+    for (const ds of dateSlots) {
+      if (ds.status === 'AVAILABLE') {
+        for (let h = ds.start_hour; h < ds.end_hour; h++) dateAvailableHours.add(h);
+      } else if (ds.status === 'REST') {
+        for (let h = ds.start_hour; h < ds.end_hour; h++) dateRestHours.add(h);
+      }
+    }
+
     // 2. 取请假记录
     const timeOffs = db.prepare('SELECT * FROM coach_time_off WHERE coach_id = ? AND date = ?').all(coachId, date);
     const restHours = new Set();
@@ -355,8 +436,13 @@ router.get('/:coachId/daily-grid', authRole(['admin', 'coach', 'member']), (req,
     const slots = [];
     for (let h = 8; h < 22; h++) {
       let status = 'UNSCHEDULED';
-      if (templateHours.has(h)) status = 'AVAILABLE';
-      if (restHours.has(h)) status = 'REST';
+      // 优先级：日期排班 > 模板 > 请假
+      if (dateAvailableHours.has(h)) status = 'AVAILABLE';
+      else if (dateRestHours.has(h)) status = 'REST';
+      else if (templateHours.has(h)) status = 'AVAILABLE';
+      // 请假覆盖可用
+      if (restHours.has(h) && status === 'AVAILABLE') status = 'REST';
+      // 预约和冲突最高优先级
       if (bookedHours.has(h)) status = 'BOOKED';
       if (conflictHours.has(h)) status = 'CONFLICT';
 
@@ -372,7 +458,7 @@ router.get('/:coachId/daily-grid', authRole(['admin', 'coach', 'member']), (req,
   } catch (e) { next(e); }
 });
 
-// 切换时段状态（上班/休息）
+// 切换时段状态（上班/休息）— 支持为未排班时段创建可用性
 router.put('/:coachId/toggle-slot', authRole(['admin']), (req, res, next) => {
   try {
     const db = getDb();
@@ -385,15 +471,23 @@ router.put('/:coachId/toggle-slot', authRole(['admin']), (req, res, next) => {
     const endTime = `${String(startHour + 1).padStart(2, '0')}:00`;
 
     if (status === 'REST') {
-      // 添加请假记录
+      // 休息：删除该时段的日期排班记录，添加请假记录
+      db.prepare('DELETE FROM coach_date_slots WHERE coach_id = ? AND date = ? AND start_hour = ?').run(coachId, date, startHour);
       const existing = db.prepare('SELECT id FROM coach_time_off WHERE coach_id = ? AND date = ? AND start_time = ?').get(coachId, date, startTime);
       if (!existing) {
         db.prepare('INSERT INTO coach_time_off (id, coach_id, date, start_time, end_time, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(uuid(), coachId, date, startTime, endTime, '管理员排班休息', now());
       }
     } else {
-      // 移除请假记录 → 恢复可用
+      // 上班：删除请假记录，创建/更新日期排班记录
       db.prepare('DELETE FROM coach_time_off WHERE coach_id = ? AND date = ? AND start_time = ?').run(coachId, date, startTime);
+      const existing = db.prepare('SELECT id FROM coach_date_slots WHERE coach_id = ? AND date = ? AND start_hour = ?').get(coachId, date, startHour);
+      if (!existing) {
+        db.prepare('INSERT INTO coach_date_slots (id, coach_id, date, start_hour, end_hour, status, business_types, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(uuid(), coachId, date, startHour, startHour + 1, 'AVAILABLE', 'PRIVATE,PRACTICE', now());
+      } else {
+        db.prepare('UPDATE coach_date_slots SET status = ? WHERE id = ?').run('AVAILABLE', existing.id);
+      }
     }
 
     writeAudit({ entity: 'coach_schedule', entityId: coachId, action: 'TOGGLE_SLOT', operator: operatorFromReq(req), detail: { date, startHour, status } });
@@ -416,13 +510,23 @@ router.post('/:coachId/batch-schedule', authRole(['admin']), (req, res, next) =>
         const startTime = `${String(h).padStart(2, '0')}:00`;
         const endTime = `${String(h + 1).padStart(2, '0')}:00`;
         if (status === 'REST') {
+          // 休息：删除日期排班，添加请假
+          db.prepare('DELETE FROM coach_date_slots WHERE coach_id = ? AND date = ? AND start_hour = ?').run(coachId, date, h);
           const existing = db.prepare('SELECT id FROM coach_time_off WHERE coach_id = ? AND date = ? AND start_time = ?').get(coachId, date, startTime);
           if (!existing) {
             db.prepare('INSERT INTO coach_time_off (id, coach_id, date, start_time, end_time, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
               .run(uuid(), coachId, date, startTime, endTime, '批量排班休息', now());
           }
         } else {
+          // 上班：删除请假，创建日期排班
           db.prepare('DELETE FROM coach_time_off WHERE coach_id = ? AND date = ? AND start_time = ?').run(coachId, date, startTime);
+          const existing = db.prepare('SELECT id FROM coach_date_slots WHERE coach_id = ? AND date = ? AND start_hour = ?').get(coachId, date, h);
+          if (!existing) {
+            db.prepare('INSERT INTO coach_date_slots (id, coach_id, date, start_hour, end_hour, status, business_types, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+              .run(uuid(), coachId, date, h, h + 1, 'AVAILABLE', 'PRIVATE,PRACTICE', now());
+          } else {
+            db.prepare('UPDATE coach_date_slots SET status = ? WHERE id = ?').run('AVAILABLE', existing.id);
+          }
         }
         count++;
       }

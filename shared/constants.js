@@ -41,7 +41,6 @@ export const CATEGORY_TO_BUSINESS = MEMBER_CATEGORIES.reduce((m, c) => {
 
 // ============ 收费模式 ============
 export const CHARGE_MODES = [
-  { code: 'PREPAID', name: '预存赠送' },
   { code: 'SESSION_PACK', name: '按节数购买（次卡）' },
   { code: 'MONTHLY', name: '包月购买（月卡）' },
   // 群活动专用

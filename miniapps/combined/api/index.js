@@ -1,5 +1,6 @@
 // 统一 API 封装
-const BASE_URL = '/api';
+// 部署在子路径时使用 /hourui/api，本地开发使用 /api
+const BASE_URL = (typeof window !== 'undefined' && window.location.pathname.includes('/hourui/')) ? '/hourui/api' : '/api';
 
 function getToken() { return uni.getStorageSync('token') || ''; }
 
@@ -25,15 +26,58 @@ function request(url, options = {}) {
           reject(new Error('未登录'));
           return;
         }
+        if (res.statusCode === 403) {
+          // 业务层面的 403（如 NO_PACK 无课包）需要携带 data 给调用方处理
+          if (res.data && res.data.message === 'NO_PACK') {
+            const err = new Error(res.data.message);
+            err.data = res.data.data;
+            err.code = res.data.code;
+            reject(err);
+            return;
+          }
+          // 权限不足：身份切换后 token 角色不匹配，引导重新登录
+          const msg = (res.data && res.data.message) || '无权限';
+          reject(new Error(msg));
+          setTimeout(() => {
+            uni.showModal({
+              title: '权限不足',
+              content: '当前身份无法执行此操作，请重新登录会员账号',
+              confirmText: '重新登录',
+              success: (r) => {
+                if (r.confirm) {
+                  uni.removeStorageSync('token');
+                  uni.removeStorageSync('user');
+                  uni.removeStorageSync('role');
+                  const app = getApp();
+                  if (app && app.globalData) {
+                    app.globalData.token = '';
+                    app.globalData.user = null;
+                    app.globalData.role = '';
+                  }
+                  uni.reLaunch({ url: '/pages/member/login/login' });
+                }
+              },
+            });
+          }, 100);
+          return;
+        }
         if (res.data.code === 0) resolve(res.data.data);
-        else { uni.showToast({ title: res.data.message || '请求失败', icon: 'none' }); reject(new Error(res.data.message)); }
+        else {
+          // 携带 data 供调用方判断（如 NO_PACK 场景）
+          const err = new Error(res.data.message);
+          err.data = res.data.data;
+          err.code = res.data.code;
+          reject(err);
+        }
       },
-      fail: (err) => { uni.showToast({ title: '网络错误', icon: 'none' }); reject(err); },
+      fail: (err) => { reject(err); },
     });
   });
 }
 
 export const api = {
+  // 通用 GET
+  get: (url, params) => request(url, { data: params }),
   // 认证（按角色）
   sendCode: (data) => request('/auth/member/send-code', { method: 'POST', data }),
   login: (role, data) => {
@@ -46,6 +90,11 @@ export const api = {
     if (!p) { uni.showToast({ title: '无效角色', icon: 'none' }); return Promise.reject(new Error('无效角色')); }
     return request(p, { method: 'POST', data });
   },
+  memberRegister: (data) => request('/auth/member/register', { method: 'POST', data }),
+  memberPasswordLogin: (data) => request('/auth/member/password-login', { method: 'POST', data }),
+  memberWechatLogin: (data) => request('/auth/member/wechat-login', { method: 'POST', data }),
+  switchIdentity: (targetRole) => request('/auth/switch-identity', { method: 'POST', data: { targetRole } }),
+  switchableRoles: () => request('/auth/switchable-roles'),
 
   // 会员端
   myAssets: () => request('/member-end/my-assets'),
@@ -74,7 +123,10 @@ export const api = {
   orderList: (params) => request('/orders', { data: params }),
   performance: () => request('/sales/performance'),
   myCommissions: () => request('/commissions/mine'),
+  myPayouts: () => request('/commissions/payouts'),
   channels: () => request('/channels'),
+  channelStats: (params) => request('/channels/stats/summary', { data: params }),
+  memberSearch: (keyword) => request('/members/search', { data: { keyword } }),
 
   // 教练端
   mySchedule: (params) => request('/sessions', { data: params }),
@@ -83,6 +135,7 @@ export const api = {
   updateAttendance: (sessionId, memberId, data) => request(`/attendance/${sessionId}/attendance/${memberId}`, { method: 'PATCH', data }),
   sessionAttendance: (sessionId) => request(`/attendance/${sessionId}/attendance`),
   myStats: (params) => request('/attendance/stats/coach', { data: params }),
+  myAttendanceDetail: (params) => request('/attendance/my-detail', { data: params }),
   coachDetail: (id) => request(`/coaches/${id}`),
 
   // 教练端 - 私教/陪练预约

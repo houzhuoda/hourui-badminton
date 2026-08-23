@@ -20,7 +20,6 @@ export const MEMBER_CATEGORIES = [
 ];
 
 export const CHARGE_MODES = [
-  { code: 'PREPAID', name: '预存赠送' },
   { code: 'SESSION_PACK', name: '次卡' },
   { code: 'MONTHLY', name: '月卡' },
   { code: 'SINGLE', name: '单次付费' },
@@ -47,6 +46,8 @@ export const BOOKING_STATUS = {
 };
 
 export const PACK_STATUS = { ACTIVE: '有效', EXPIRED: '已到期', CONSUMED: '已用完' };
+
+export const ORDER_STATUS = { PAID: '已支付', PENDING: '待支付', REFUNDED: '已退款', CANCELLED: '已取消' };
 
 export function businessTypeName(code) {
   return BUSINESS_TYPES.find((b) => b.code === code)?.name || code;

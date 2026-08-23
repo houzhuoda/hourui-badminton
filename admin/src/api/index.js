@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.BASE_URL.replace(/\/admin\/$/, '/api/'),
   timeout: 10000,
 });
 
@@ -26,7 +26,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_user');
-      window.location.href = '/login';
+      window.location.href = import.meta.env.BASE_URL + 'login';
     }
     const msg = error.response?.data?.message || error.message;
     return Promise.reject(new Error(msg));
@@ -37,7 +37,7 @@ export default api;
 
 // 认证
 export const authApi = {
-  login: (data) => axios.post('/api/auth/login', data).then((r) => r.data.data),
+  login: (data) => axios.post(`${import.meta.env.BASE_URL.replace(/\/admin\/$/, '/api/')}auth/login`, data).then((r) => r.data.data),
 };
 
 // 通用 CRUD 辅助

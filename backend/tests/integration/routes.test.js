@@ -93,26 +93,6 @@ describe('课程管理 API 补充', () => {
     expect(res.body.code).toBe(0);
   });
 
-  it('预存赠送规则 CRUD', async () => {
-    // 列表
-    const listRes = await request(app).get('/api/courses/prepaid-rules/list').set('Authorization', `Bearer ${adminToken}`);
-    expect(listRes.body.code).toBe(0);
-    // 新增
-    const createRes = await request(app).post('/api/courses/prepaid-rules')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ depositAmount: 20000, giftAmount: 10000 });
-    expect(createRes.status).toBe(201);
-    // 编辑
-    const editRes = await request(app).put(`/api/courses/prepaid-rules/${createRes.body.data.id}`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ giftAmount: 12000 });
-    expect(editRes.body.code).toBe(0);
-    // 删除
-    const delRes = await request(app).delete(`/api/courses/prepaid-rules/${createRes.body.data.id}`)
-      .set('Authorization', `Bearer ${adminToken}`);
-    expect(delRes.body.code).toBe(0);
-  });
-
   it('折扣规则 CRUD', async () => {
     const createRes = await request(app).post('/api/courses/discount-rules')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -134,6 +114,14 @@ describe('教练管理 API 补充', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ name: '新教练', phone: '13800006666', password: '123456', primaryBusinessType: 'ADULT_GROUP', salesEnabled: true });
     expect(res.status).toBe(201);
+  });
+
+  it('教练手机号不能与已有销售手机号重复', async () => {
+    const res = await request(app).post('/api/coaches')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: '冲突教练', phone: '13800000001', password: '123456' });
+    expect(res.body.code).not.toBe(0);
+    expect(res.body.message).toContain('销售');
   });
 
   it('编辑教练', async () => {
@@ -297,11 +285,134 @@ describe('销售端 API', () => {
     expect(res.body.code).toBe(0);
   });
 
+  it('开通销售能力的教练可直接使用销售工作台', async () => {
+    const dashboard = await request(app).get('/api/sales/dashboard').set('Authorization', `Bearer ${coachToken}`);
+    expect(dashboard.body.code).toBe(0);
+    const members = await request(app).get('/api/members').set('Authorization', `Bearer ${coachToken}`);
+    expect(members.body.code).toBe(0);
+    const performance = await request(app).get('/api/sales/performance').set('Authorization', `Bearer ${coachToken}`);
+    expect(performance.body.code).toBe(0);
+  });
+
+  it('教练销售能力不需要重新登录销售账号', async () => {
+    const coach = await request(app).get(`/api/coaches/${(await getFirstCoachId(adminToken)).id}`)
+      .set('Authorization', `Bearer ${coachToken}`);
+    expect(coach.body.data.sales_enabled).toBe(1);
+  });
   it('教练课表摘要', async () => {
     const res = await request(app).get('/api/sales/coach/schedule-summary')
       .set('Authorization', `Bearer ${coachToken}`);
     expect(res.body.code).toBe(0);
   });
+
+  it('销售和教练手机号可直接登录会员系统', async () => {
+    const salesMemberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000001', code: '1234' });
+    const coachMemberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000002', code: '1234' });
+    expect(salesMemberLogin.body.code).toBe(0);
+    expect(salesMemberLogin.body.data.user.role).toBe('member');
+    expect(salesMemberLogin.body.data.user.memberId).toBeTruthy();
+    expect(coachMemberLogin.body.code).toBe(0);
+    expect(coachMemberLogin.body.data.user.role).toBe('member');
+    expect(coachMemberLogin.body.data.user.memberId).toBeTruthy();
+  });
+
+  it('会员可直接切换到同手机号的销售身份，无需再次登录', async () => {
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000001', code: '1234' });
+    const memberToken = memberLogin.body.data.token;
+    const switchRes = await request(app).post('/api/auth/switch-identity').set('Authorization', `Bearer ${memberToken}`).send({ targetRole: 'sales' });
+    expect(switchRes.body.code).toBe(0);
+    expect(switchRes.body.data.user.role).toBe('sales');
+    expect(switchRes.body.data.token).toBeTruthy();
+    // 验证切换后的 token 可访问销售工作台
+    const dashboard = await request(app).get('/api/sales/dashboard').set('Authorization', `Bearer ${switchRes.body.data.token}`);
+    expect(dashboard.body.code).toBe(0);
+  });
+
+  it('会员可直接切换到同手机号的教练身份，无需再次登录', async () => {
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000002', code: '1234' });
+    const memberToken = memberLogin.body.data.token;
+    const switchRes = await request(app).post('/api/auth/switch-identity').set('Authorization', `Bearer ${memberToken}`).send({ targetRole: 'coach' });
+    expect(switchRes.body.code).toBe(0);
+    expect(switchRes.body.data.user.role).toBe('coach');
+    expect(switchRes.body.data.token).toBeTruthy();
+  });
+
+  it('查询可切换身份列表', async () => {
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000001', code: '1234' });
+    const res = await request(app).get('/api/auth/switchable-roles').set('Authorization', `Bearer ${memberLogin.body.data.token }`);
+    expect(res.body.code).toBe(0);
+    const roles = res.body.data.roles;
+    expect(roles.some((r) => r.role === 'sales')).toBe(true);
+  });
+
+  it('无对应员工账号的手机号切换身份应失败', async () => {
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13900006001', code: '1234' });
+    const switchRes = await request(app).post('/api/auth/switch-identity').set('Authorization', `Bearer ${memberLogin.body.data.token}`).send({ targetRole: 'sales' });
+    expect(switchRes.body.code).not.toBe(0);
+  });
+
+  it('新会员注册需同意隐私协议', async () => {
+    const res = await request(app).post('/api/auth/member/register').send({ phone: '13900007777', code: '1234', password: '123456', agreedPrivacy: false });
+    expect(res.body.code).not.toBe(0);
+    expect(res.body.message).toContain('隐私');
+  });
+
+  it('新会员注册成功后可直接登录', async () => {
+    const res = await request(app).post('/api/auth/member/register').send({ phone: '13900007777', code: '1234', password: '123456', name: '自注册测试', agreedPrivacy: true });
+    expect(res.body.code).toBe(0);
+    expect(res.body.data.user.role).toBe('member');
+    expect(res.body.data.token).toBeTruthy();
+  });
+
+  it('重复注册同一手机号应失败', async () => {
+    const res = await request(app).post('/api/auth/member/register').send({ phone: '13900007777', code: '1234', password: '123456', agreedPrivacy: true });
+    expect(res.body.code).not.toBe(0);
+  });
+
+  it('会员密码登录成功', async () => {
+    const res = await request(app).post('/api/auth/member/password-login').send({ phone: '13900007777', password: '123456' });
+    expect(res.body.code).toBe(0);
+    expect(res.body.data.user.role).toBe('member');
+  });
+
+  it('会员密码登录密码错误应失败', async () => {
+    const res = await request(app).post('/api/auth/member/password-login').send({ phone: '13900007777', password: 'wrong' });
+    expect(res.body.code).not.toBe(0);
+  });
+
+  it('微信一键登录可创建会员并再次登录', async () => {
+    const r1 = await request(app).post('/api/auth/member/wechat-login').send({ code: 'test_wx_001', nickname: '微信测试用户' });
+    expect(r1.body.code).toBe(0);
+    expect(r1.body.data.user.role).toBe('member');
+    const memberId = r1.body.data.user.id;
+    const r2 = await request(app).post('/api/auth/member/wechat-login').send({ code: 'test_wx_001' });
+    expect(r2.body.code).toBe(0);
+    expect(r2.body.data.user.id).toBe(memberId);
+  });
+
+  it('教练手机号在会员端可查询到教练身份', async () => {
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000002', code: '1234' });
+    const res = await request(app).get('/api/auth/switchable-roles').set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    expect(res.body.code).toBe(0);
+    expect(res.body.data.roles.some((r) => r.role === 'coach')).toBe(true);
+  });
+
+  it('教练被删除后会员端不再显示教练切换按钮', async () => {
+    // 先确认教练存在
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13800000002', code: '1234' });
+    let res = await request(app).get('/api/auth/switchable-roles').set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    expect(res.body.data.roles.some((r) => r.role === 'coach')).toBe(true);
+    // 停用教练
+    await request(app).put(`/api/coaches/${coach.id}`).set('Authorization', `Bearer ${adminToken}`).send({ status: 'DISABLED' });
+    // 重新登录获取新 token
+    const memberLogin2 = await request(app).post('/api/auth/member/login').send({ phone: '13800000002', code: '1234' });
+    res = await request(app).get('/api/auth/switchable-roles').set('Authorization', `Bearer ${memberLogin2.body.data.token}`);
+    expect(res.body.data.roles.some((r) => r.role === 'coach')).toBe(false);
+    // 恢复教练
+    await request(app).put(`/api/coaches/${coach.id}`).set('Authorization', `Bearer ${adminToken}`).send({ status: 'ACTIVE' });
+  });
+
+
 });
 
 describe('提成 API 补充', () => {
@@ -426,7 +537,7 @@ describe('订单 API 补充', () => {
     const orderId = listRes.body.data.list[0].id;
     const res = await request(app).post(`/api/orders/${orderId}/refund`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ reason: '测试退款' });
+      .send({ reason: '测试退款', adminPassword: 'admin123' });
     expect(res.body.code).toBe(0);
   });
 });
@@ -458,5 +569,93 @@ describe('出勤 API 补充', () => {
       .set('Authorization', `Bearer ${coachToken}`)
       .send({ status: 'ABSENT', reason: '改状态' });
     expect(res.body.code).toBe(0);
+  });
+});
+
+describe('私教/陪练排班', () => {
+  const testDate = '2026-12-20';
+
+  it('为未排班时段创建可用排班（toggle-slot AVAILABLE）', async () => {
+    // 先确认该日期该时段存在
+    const before = await request(app).get(`/api/private-bookings/${coach.id}/daily-grid?date=${testDate}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    const slot10 = before.body.data.slots.find((s) => s.hour === 10);
+    expect(slot10).toBeTruthy();
+
+    // 设置为 AVAILABLE
+    const res = await request(app).put(`/api/private-bookings/${coach.id}/toggle-slot`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ date: testDate, startHour: 10, status: 'AVAILABLE' });
+    expect(res.body.code).toBe(0);
+
+    // 验证网格中该时段变为 AVAILABLE
+    const after = await request(app).get(`/api/private-bookings/${coach.id}/daily-grid?date=${testDate}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    const slot10After = after.body.data.slots.find((s) => s.hour === 10);
+    expect(slot10After.status).toBe('AVAILABLE');
+  });
+
+  it('会员端可立即看到排班后的可约时段', async () => {
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13900006001', code: '1234' });
+    const res = await request(app).get(`/api/private-bookings/${coach.id}/available-slots?date=${testDate}&businessType=PRIVATE`)
+      .set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    expect(res.body.code).toBe(0);
+    const slots = res.body.data;
+    const slot10 = slots.find((s) => s.start_time === '10:00');
+    expect(slot10).toBeTruthy();
+    expect(slot10.available).toBe(true);
+  });
+
+  it('切换为休息后会员端不再显示该时段', async () => {
+    await request(app).put(`/api/private-bookings/${coach.id}/toggle-slot`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ date: testDate, startHour: 10, status: 'REST' });
+
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13900006001', code: '1234' });
+    const res = await request(app).get(`/api/private-bookings/${coach.id}/available-slots?date=${testDate}&businessType=PRIVATE`)
+      .set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    const slot10 = res.body.data.find((s) => s.start_time === '10:00');
+    expect(slot10).toBeUndefined();
+  });
+
+  it('恢复为可用后会员端重新可见', async () => {
+    await request(app).put(`/api/private-bookings/${coach.id}/toggle-slot`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ date: testDate, startHour: 10, status: 'AVAILABLE' });
+
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13900006001', code: '1234' });
+    const res = await request(app).get(`/api/private-bookings/${coach.id}/available-slots?date=${testDate}&businessType=PRIVATE`)
+      .set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    const slot10 = res.body.data.find((s) => s.start_time === '10:00');
+    expect(slot10).toBeTruthy();
+    expect(slot10.available).toBe(true);
+  });
+
+  it('批量排班后会员端可见多个时段', async () => {
+    const batchDate = '2026-12-21';
+    await request(app).post(`/api/private-bookings/${coach.id}/batch-schedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ dates: [batchDate], hours: [14, 15, 16], status: 'AVAILABLE' });
+
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13900006001', code: '1234' });
+    const res = await request(app).get(`/api/private-bookings/${coach.id}/available-slots?date=${batchDate}&businessType=PRIVATE`)
+      .set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    const slots = res.body.data;
+    expect(slots.some((s) => s.start_time === '14:00')).toBe(true);
+    expect(slots.some((s) => s.start_time === '15:00')).toBe(true);
+    expect(slots.some((s) => s.start_time === '16:00')).toBe(true);
+  });
+
+  it('批量休息后会员端不再显示对应时段', async () => {
+    const batchDate = '2026-12-21';
+    await request(app).post(`/api/private-bookings/${coach.id}/batch-schedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ dates: [batchDate], hours: [14], status: 'REST' });
+
+    const memberLogin = await request(app).post('/api/auth/member/login').send({ phone: '13900006001', code: '1234' });
+    const res = await request(app).get(`/api/private-bookings/${coach.id}/available-slots?date=${batchDate}&businessType=PRIVATE`)
+      .set('Authorization', `Bearer ${memberLogin.body.data.token}`);
+    expect(res.body.data.some((s) => s.start_time === '14:00')).toBe(false);
+    expect(res.body.data.some((s) => s.start_time === '15:00')).toBe(true);
   });
 });

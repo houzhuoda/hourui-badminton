@@ -20,11 +20,14 @@ function getSP(courseId) { return getDb().prepare('SELECT * FROM course_session_
 function getMP(courseId) { return getDb().prepare('SELECT * FROM course_monthly_pricing WHERE course_id = ? AND status = ? LIMIT 1').get(courseId, 'ACTIVE'); }
 
 describe('订单折扣 / 提成分支', () => {
-  it('FIXED 折扣生效', () => {
+  it('折扣功能已取消，不应用任何折扣', () => {
     const db = getDb();
     db.prepare(`INSERT INTO discount_rules (id, name, business_type, discount_type, discount_value, target, status, created_at, updated_at) VALUES (?, '100元价', 'PRIVATE', 'FIXED', 100, 'ALL', 'ACTIVE', datetime('now'), datetime('now'))`).run(uuid());
     const r = calculateBestDiscount({ businessType: 'PRIVATE', courseId: null, amount: 300, isNew: true, db });
-    expect(r.finalAmount).toBe(100);
+    // 折扣功能已取消：返回原价，不应用折扣
+    expect(r.finalAmount).toBe(300);
+    expect(r.discountAmount).toBe(0);
+    expect(r.appliedRule).toBeNull();
   });
 
   it('折扣规则有起止日期但过期', () => {
@@ -126,18 +129,6 @@ describe('退款分支', () => {
     const s = createSession({ courseId: course.id, coachId: coach.id, date: '2026-10-01', startTime: '10:00', endTime: '11:00', capacity: 1, participantIds: [m.id] }, operator);
     submitAttendance(s.id, [{ memberId: m.id, status: 'PRESENT' }], operator);
     const r = refundOrder(order.orderId, operator, '部分使用');
-    expect(r.refundAmount).toBeGreaterThan(0);
-  });
-
-  it('预存部分消费后退本金', () => {
-    const m = createMember({ name: '预存部分退', phone: '13900009008', categoryCode: 'M_PRIVATE' }, operator);
-    const order = createOrder({ memberId: m.id, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true }, operator);
-    const course = getCourse('PRIVATE');
-    const coach = getCoach();
-    const s = createSession({ courseId: course.id, coachId: coach.id, date: '2026-10-02', startTime: '10:00', endTime: '11:00', capacity: 1, participantIds: [m.id] }, operator);
-    submitAttendance(s.id, [{ memberId: m.id, status: 'PRESENT' }], operator);
-    const r = refundOrder(order.orderId, operator, '部分消费');
-    expect(r.refundAmount).toBeLessThan(5000);
     expect(r.refundAmount).toBeGreaterThan(0);
   });
 });

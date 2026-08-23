@@ -1,4 +1,4 @@
-// 单元测试：出勤核销服务（次卡/预存/月卡扣减 + 幂等）
+// 单元测试：出勤核销服务（次卡/月卡扣减 + 幂等）
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { setupTestDb, teardownTestDb } from '../helpers.js';
 import { createMember } from '../../src/services/member.js';
@@ -58,57 +58,6 @@ describe('次卡核销', () => {
     const pack = db.prepare('SELECT * FROM packs WHERE id = ?').get(order.packId);
     expect(pack.used_sessions).toBe(1);
     expect(pack.remaining_sessions).toBe(pack.total_sessions - 1);
-  });
-});
-
-describe('预存核销（Q-01：先扣本金后扣赠送）', () => {
-  it('应先扣本金', () => {
-    const member = createMember({ name: '预存核销', phone: '13900003002', categoryCode: 'M_PRIVATE' }, operator);
-    const course = getCourse('PRIVATE');
-    const coach = getCoach();
-
-    // 预存 5000 赠 2000
-    createOrder({ memberId: member.id, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true }, operator);
-
-    const session = createSession({
-      courseId: course.id, coachId: coach.id, date: '2026-09-02',
-      startTime: '10:00', endTime: '11:00', capacity: 1, participantIds: [member.id],
-    }, operator);
-
-    submitAttendance(session.id, [{ memberId: member.id, status: 'PRESENT' }], operator);
-
-    const db = getDb();
-    const account = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(member.id);
-    // 课程单价 300，先扣本金
-    expect(account.principal_balance).toBe(5000 - 300);
-    expect(account.gift_balance).toBe(2000); // 赠送未动
-  });
-
-  it('本金不足时应扣赠送', () => {
-    const member = createMember({ name: '本金不足', phone: '13900003003', categoryCode: 'M_PRIVATE' }, operator);
-    const course = getCourse('PRIVATE');
-    const coach = getCoach();
-
-    // 预存 3000 赠 1000，总 4000
-    createOrder({ memberId: member.id, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 3000, confirmed: true }, operator);
-
-    // 上 15 节课，每节 300，总 4500 > 4000
-    for (let i = 0; i < 14; i++) {
-      const session = createSession({
-        courseId: course.id, coachId: coach.id, date: `2026-09-${String(i + 10).padStart(2, '0')}`,
-        startTime: '10:00', endTime: '11:00', capacity: 1, participantIds: [member.id],
-      }, operator);
-      submitAttendance(session.id, [{ memberId: member.id, status: 'PRESENT' }], operator);
-    }
-
-    const db = getDb();
-    const account = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(member.id);
-    // 14 节 × 300 = 4200，本金 3000 扣完，赠送扣 1200，剩余赠送 1000-1200 < 0?
-    // 实际：本金 3000 + 赠送 1000 = 4000，14 节 × 300 = 4200 > 4000
-    // 第 14 节时余额不足，应 PENDING_PAY
-    // 13 节 × 300 = 3900，剩余 100
-    // 第 14 节需 300，余额 100 不足
-    expect(account.total_balance).toBeLessThan(300);
   });
 });
 

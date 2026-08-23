@@ -1,31 +1,57 @@
-/* 侯瑞羽毛球 - Pro Sport 运动健身 App 主题 */
+/* 侯瑞羽毛球 — Pro Sport 运动活力风 App 主题 v2 */
 :root {
-  /* 1rpx = 屏幕宽度 / 750，最大宽度 500px */
   --rpx: calc(min(100vw, 500px) / 750);
   --app-width: min(100vw, 500px);
 
-  /* Pro Sport 主题色 */
-  --sp-dark: #0F172A;
-  --sp-dark-2: #1E293B;
+  /* 运动活力主色 */
   --sp-orange: #FF4D28;
   --sp-orange-light: #FF7A5C;
+  --sp-orange-dark: #E63E18;
   --sp-cyan: #06B6D4;
+  --sp-cyan-light: #22D3EE;
+  --sp-purple: #722ED1;
+  --sp-purple-light: #9254DE;
+  --sp-green: #10B981;
+  --sp-amber: #F59E0B;
+  --sp-red: #EF4444;
+
+  /* 中性色 */
+  --sp-dark: #0F172A;
+  --sp-dark-2: #1E293B;
+  --sp-dark-3: #334155;
   --sp-white: #FFFFFF;
-  --sp-bg: #F3F4F6;
+  --sp-bg: #F0F2F5;
+  --sp-bg-warm: #FFF5F0;
   --sp-gray: #6B7280;
+  --sp-gray-light: #9CA3AF;
   --sp-light-gray: #E5E7EB;
-  --sp-shadow: 0 12rpx 32rpx rgba(15, 23, 42, 0.12);
+  --sp-border: #EEF0F3;
+
+  /* 阴影 */
+  --sp-shadow-sm: 0 4rpx 12rpx rgba(15, 23, 42, 0.06);
+  --sp-shadow: 0 8rpx 28rpx rgba(15, 23, 42, 0.10);
+  --sp-shadow-lg: 0 16rpx 48rpx rgba(15, 23, 42, 0.14);
+  --sp-shadow-orange: 0 8rpx 28rpx rgba(255, 77, 40, 0.25);
+  --sp-shadow-cyan: 0 8rpx 28rpx rgba(6, 182, 212, 0.20);
+
+  /* 渐变 */
+  --grad-orange: linear-gradient(135deg, #FF4D28 0%, #FF7A5C 100%);
+  --grad-orange-deep: linear-gradient(135deg, #E63E18 0%, #FF4D28 100%);
+  --grad-cyan: linear-gradient(135deg, #06B6D4 0%, #22D3EE 100%);
+  --grad-purple: linear-gradient(135deg, #722ED1 0%, #9254DE 100%);
+  --grad-dark: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+  --grad-warm: linear-gradient(135deg, #FFF5F0 0%, #FFE8DE 100%);
 
   /* 语义化 */
   --primary: var(--sp-orange);
   --primary-light: var(--sp-orange-light);
-  --primary-dark: #E63E18;
+  --primary-dark: var(--sp-orange-dark);
   --accent: var(--sp-cyan);
   --bg: var(--sp-bg);
   --card: var(--sp-white);
   --text: var(--sp-dark);
   --text-sec: var(--sp-gray);
-  --border: var(--sp-light-gray);
+  --border: var(--sp-border);
 }
 
 * { box-sizing: border-box; }
@@ -37,6 +63,7 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 view, div { display: block; box-sizing: border-box; }
@@ -44,7 +71,7 @@ text, span { display: inline; }
 image, img { display: inline-block; }
 input, textarea, picker, scroll-view { display: block; box-sizing: border-box; }
 
-/* 按钮主题 - 运动风大圆角 */
+/* ============ 按钮系统 ============ */
 button {
   display: inline-block;
   box-sizing: border-box;
@@ -52,26 +79,27 @@ button {
   border: none;
   background: transparent;
   font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
-button.btn, button.switch-btn, button.send-btn {
+button.btn, button.switch-btn, button.send-btn, button.submit-btn, button.action-btn, button.logout-btn {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  border-radius: 24rpx;
+  border-radius: 28rpx;
   font-size: 32rpx;
-  font-weight: 700;
+  font-weight: 800;
   color: #fff;
-  background: var(--primary);
-  box-shadow: var(--sp-shadow);
-  transition: all 0.15s;
+  background: var(--grad-orange);
+  box-shadow: var(--sp-shadow-orange);
+  transition: all 0.15s ease;
   letter-spacing: 2rpx;
+  border: none;
 }
 
-button.btn:active, button.switch-btn:active, button.send-btn:active {
-  transform: scale(0.98);
-  box-shadow: none;
-  background: var(--primary-dark);
+button.btn:active, button.switch-btn:active, button.submit-btn:active, button.action-btn:active {
+  transform: scale(0.97);
+  box-shadow: var(--sp-shadow-sm);
 }
 
 button.send-btn {
@@ -80,24 +108,110 @@ button.send-btn {
   font-size: 26rpx;
   height: 90rpx;
   line-height: 90rpx;
-  border-radius: 16rpx;
+  border-radius: 20rpx;
+  background: var(--sp-white);
+  color: var(--primary);
+  box-shadow: var(--sp-shadow-sm);
+  border: 2rpx solid var(--sp-orange);
 }
 
-/* 输入框 */
+button.send-btn:active {
+  background: var(--sp-bg-warm);
+}
+
+/* ============ 输入框 ============ */
 input, textarea {
   width: 100%;
   height: 96rpx;
   border: 2rpx solid var(--border);
-  border-radius: 16rpx;
+  border-radius: 20rpx;
   padding: 0 28rpx;
   font-size: 30rpx;
   background: var(--card);
   color: var(--text);
   font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 4rpx rgba(255, 77, 40, 0.08);
+  box-shadow: 0 0 0 6rpx rgba(255, 77, 40, 0.10);
+}
+
+textarea {
+  height: auto;
+  min-height: 120rpx;
+  padding: 20rpx 28rpx;
+  line-height: 1.6;
+}
+
+/* ============ 通用卡片 ============ */
+.sp-card {
+  background: var(--card);
+  border-radius: 28rpx;
+  padding: 32rpx;
+  box-shadow: var(--sp-shadow);
+}
+
+.sp-card-flat {
+  background: var(--card);
+  border-radius: 24rpx;
+  padding: 28rpx;
+  box-shadow: var(--sp-shadow-sm);
+}
+
+/* ============ 标签/徽章 ============ */
+.sp-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6rpx 20rpx;
+  border-radius: 100rpx;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.sp-badge-orange { background: rgba(255, 77, 40, 0.10); color: var(--primary); }
+.sp-badge-cyan { background: rgba(6, 182, 212, 0.10); color: var(--accent); }
+.sp-badge-green { background: rgba(16, 185, 129, 0.10); color: var(--sp-green); }
+.sp-badge-purple { background: rgba(114, 46, 209, 0.10); color: var(--sp-purple); }
+.sp-badge-amber { background: rgba(245, 158, 11, 0.10); color: var(--sp-amber); }
+.sp-badge-red { background: rgba(239, 68, 68, 0.10); color: var(--sp-red); }
+.sp-badge-gray { background: rgba(107, 114, 128, 0.10); color: var(--sp-gray); }
+
+/* ============ 分割线 ============ */
+.sp-divider {
+  height: 1rpx;
+  background: var(--border);
+  margin: 24rpx 0;
+}
+
+/* ============ 页面通用 ============ */
+.sp-page {
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 32rpx;
+}
+
+.sp-page-title {
+  font-size: 40rpx;
+  font-weight: 900;
+  color: var(--text);
+  margin-bottom: 24rpx;
+  display: block;
+}
+
+.sp-section-title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 20rpx;
+  display: block;
+}
+
+.sp-empty {
+  text-align: center;
+  color: var(--sp-gray-light);
+  padding: 80rpx 40rpx;
+  font-size: 28rpx;
 }

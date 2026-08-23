@@ -58,6 +58,8 @@ export const uni = {
   reLaunch(opts) { window.location.hash = opts.url; },
   switchTab(opts) { window.location.hash = opts.url; },
   navigateBack() { window.history.back(); },
+  showLoading(opts) { /* 模拟：无操作，toast 已足够 */ },
+  hideLoading() { /* 模拟：无操作 */ },
 };
 
 export function getApp() {

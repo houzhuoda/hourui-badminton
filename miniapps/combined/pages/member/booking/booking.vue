@@ -1,97 +1,83 @@
 <template>
-  <view class="page">
-    <view class="header">
-      <text class="back" @click="back">‹</text>
-      <text class="title">预约课程</text>
+  <view class="booking-panel">
+    <!-- 课程色块按钮，一排3个，按固定顺序排列 -->
+    <view class="course-grid">
+      <view
+        v-for="c in sortedCourses"
+        :key="c.id"
+        class="course-block"
+        :style="{ background: colorFor(c.business_type) }"
+        @click="goCourse(c)"
+      >
+        <text class="block-icon">{{ iconFor(c.business_type) }}</text>
+        <text class="block-name">{{ c.name }}</text>
+      </view>
     </view>
 
-    <view class="filter-bar">
-      <view class="filter-item" :class="{ active: businessType === '' }" @click="setType('')">全部</view>
-      <view class="filter-item" :class="{ active: businessType === 'PRIVATE' }" @click="goPrivate('PRIVATE')">私教</view>
-      <view class="filter-item" :class="{ active: businessType === 'ADULT_GROUP' }" @click="setType('ADULT_GROUP')">大课</view>
-      <view class="filter-item" :class="{ active: businessType === 'PRACTICE' }" @click="goPrivate('PRACTICE')">陪练</view>
-      <view class="filter-item" :class="{ active: businessType === 'KID_GROUP' }" @click="setType('KID_GROUP')">儿童</view>
-      <view class="filter-item" :class="{ active: businessType === 'FITNESS' }" @click="setType('FITNESS')">体能</view>
-      <view class="filter-item" :class="{ active: businessType === 'GYM' }" @click="setType('GYM')">健身</view>
-      <view class="filter-item" :class="{ active: businessType === 'COMMUNITY' }" @click="setType('COMMUNITY')">群活动</view>
+    <view v-if="courses.length === 0" class="empty">
+      <text class="empty-emoji">🏸</text>
+      <text class="empty-text">暂无可约课程</text>
     </view>
 
-    <view class="calendar">
-      <view class="cal-header">
-        <text class="cal-nav" @click="prevWeek">‹</text>
-        <text class="cal-title">{{ monthLabel }}</text>
-        <text class="cal-nav" @click="nextWeek">›</text>
+    <!-- 非私教/陪练：展示一周内可约课次 -->
+    <view v-if="activeCourse && !isPrivateType(activeCourse.business_type)" class="sessions-section">
+      <view class="course-banner" :style="{ background: colorFor(activeCourse.business_type) }">
+        <text class="banner-name">{{ activeCourse.name }}</text>
+        <text class="banner-close" @click="activeCourse = null">✕</text>
       </view>
-      <view class="cal-weekdays">
-        <text class="cal-wd">日</text>
-        <text class="cal-wd">一</text>
-        <text class="cal-wd">二</text>
-        <text class="cal-wd">三</text>
-        <text class="cal-wd">四</text>
-        <text class="cal-wd">五</text>
-        <text class="cal-wd">六</text>
-      </view>
-      <view class="cal-grid">
-        <view
-          v-for="d in calendarDays"
-          :key="d.key"
-          class="cal-day"
-          :class="{
-            'other-month': !d.inMonth,
-            'today': d.isToday,
-            'selected': d.dateStr === selectedDate,
-            'has-sessions': d.count > 0,
-          }"
-          @click="d.inMonth && selectDate(d.dateStr)"
-        >
-          <text class="day-num">{{ d.day }}</text>
-          <text v-if="d.count > 0" class="day-dot">{{ d.count }}</text>
+
+      <scroll-view scroll-x class="date-scroll" :show-scrollbar="false">
+        <view class="date-tabs">
+          <view
+            v-for="d in weekDays"
+            :key="d.dateStr"
+            class="date-tab"
+            :class="{ active: selectedDate === d.dateStr }"
+            @click="selectDate(d.dateStr)"
+          >
+            <text class="dt-wd">{{ d.wd }}</text>
+            <text class="dt-day">{{ d.day }}</text>
+          </view>
         </view>
+      </scroll-view>
+
+      <view v-if="sessionList.length === 0" class="empty">
+        <text class="empty-emoji">📅</text>
+        <text class="empty-text">该日期暂无可约课次</text>
       </view>
-    </view>
 
-    <view class="selected-info">
-      <text class="selected-date">{{ selectedDateLabel }}</text>
-      <text class="selected-count" v-if="list.length > 0">{{ list.length }} 节可约</text>
-    </view>
-
-    <view v-if="list.length === 0" class="empty">该日期暂无可约课次</view>
-
-    <view v-for="s in list" :key="s.id" class="session-card">
-      <view class="card-main">
+      <view v-for="s in sessionList" :key="s.id" class="session-card" :class="{ disabled: isBooked(s.id) }">
         <view class="time-col">
           <text class="time-text">{{ s.start_time }}</text>
           <text class="time-end">- {{ s.end_time }}</text>
         </view>
         <view class="info-col">
-          <view class="info-head">
-            <text class="course-name">{{ s.course_name }}</text>
-            <text class="biz-tag">{{ bizName(s.business_type) }}</text>
-          </view>
-          <view class="info-meta">
-            <text class="meta-text">教练 {{ s.coach_name || '待定' }}</text>
-            <text class="meta-text" v-if="s.court_name">· {{ s.court_name }}</text>
-          </view>
+          <text class="course-name" v-if="s.course_name !== activeCourse?.name">{{ s.course_name }}</text>
+          <text class="meta-text">🏸 教练 {{ s.coach_name || '待定' }}</text>
           <text class="capacity">可约 {{ s.available_slots }} 位</text>
         </view>
-      </view>
-      <view class="card-action">
-        <button class="book-btn" @click="bookSession(s)" v-if="!isBooked(s.id)">立即预约</button>
-        <text v-else class="booked-tag">已预约</text>
+        <view class="card-action">
+          <button class="book-btn" @click="bookSession(s)" v-if="!isBooked(s.id)">立即预约</button>
+          <text v-else class="booked-tag">已预约</text>
+        </view>
       </view>
     </view>
 
-    <view class="my-bookings" v-if="bookings.length > 0">
-      <text class="section-title">我的约课记录</text>
-      <view v-for="b in bookings" :key="b.id" class="booking-row">
-        <view class="booking-left">
-          <text class="booking-course">{{ b.course_name }}</text>
-          <text class="booking-time">{{ b.date }} {{ b.start_time }}</text>
+    <!-- 客服微信开卡弹窗 -->
+    <view v-if="serviceVisible" class="service-mask" @click="serviceVisible = false">
+      <view class="service-sheet" @click.stop>
+        <view class="service-handle"></view>
+        <text class="service-title">需要开通课包才能约课</text>
+        <text class="service-desc">您当前没有该课程的有效次卡或月卡，请添加客服微信开通课包</text>
+        <view v-if="serviceWechatQr" class="service-qr-box">
+          <image :src="serviceWechatQr" mode="aspectFit" class="service-qr" />
         </view>
-        <view class="booking-right">
-          <text class="booking-status" :class="b.status">{{ bookingStatusName(b.status) }}</text>
-          <button v-if="b.status === 'BOOKED'" class="cancel-btn" @click="cancelBooking(b)">取消</button>
+        <view v-if="serviceWechat" class="service-wechat-box">
+          <text class="service-wechat-label">客服微信：</text>
+          <text class="service-wechat-value">{{ serviceWechat }}</text>
+          <text class="service-copy" @click="copyWechat">复制</text>
         </view>
+        <button class="service-btn" @click="serviceVisible = false">我知道了</button>
       </view>
     </view>
   </view>
@@ -101,198 +87,195 @@
 import { api } from '../../../api/index.js';
 import { BUSINESS_TYPES, BOOKING_STATUS } from '../../../utils/constants.js';
 
+const COLOR_MAP = {
+  PRIVATE: 'linear-gradient(135deg, #ff6b6b, #ee5a24)',
+  PRACTICE: 'linear-gradient(135deg, #f0932b, #e67e22)',
+  ADULT_GROUP: 'linear-gradient(135deg, #6c5ce7, #a29bfe)',
+  KID_GROUP: 'linear-gradient(135deg, #00b894, #55efc4)',
+  GYM: 'linear-gradient(135deg, #0984e3, #74b9ff)',
+  FITNESS: 'linear-gradient(135deg, #e84393, #fd79a8)',
+  COMMUNITY: 'linear-gradient(135deg, #2d3436, #636e72)',
+};
+
+const ICON_MAP = {
+  PRIVATE: '私', PRACTICE: '陪', ADULT_GROUP: '大', KID_GROUP: '童',
+  GYM: '健', FITNESS: '体', COMMUNITY: '群',
+};
+
 export default {
   data() {
     const today = new Date();
-    const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    const todayStr = fmt(today);
-    // 当月1号
-    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const wdNames = ['日', '一', '二', '三', '四', '五', '六'];
+    const weekDays = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today); d.setDate(today.getDate() + i);
+      weekDays.push({
+        dateStr: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
+        wd: i === 0 ? '今天' : '周' + wdNames[d.getDay()],
+        day: d.getDate(),
+      });
+    }
     return {
-      businessType: '',
-      list: [],
+      courses: [],
       bookings: [],
-      allSessions: [],
-      selectedDate: todayStr,
-      viewYear: today.getFullYear(),
-      viewMonth: today.getMonth(),
-      todayStr,
-      fmt,
+      activeCourse: null,
+      selectedDate: weekDays[0].dateStr,
+      sessionList: [],
+      weekDays,
+      serviceVisible: false,
+      serviceWechat: '',
+      serviceWechatQr: '',
     };
   },
   computed: {
-    monthLabel() {
-      return `${this.viewYear}年${this.viewMonth + 1}月`;
-    },
-    selectedDateLabel() {
-      if (!this.selectedDate) return '请选择日期';
-      const [y, m, d] = this.selectedDate.split('-');
-      const date = new Date(Number(y), Number(m) - 1, Number(d));
-      const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
-      return `${m}月${d}日 ${wd}`;
-    },
-    calendarDays() {
-      const days = [];
-      const year = this.viewYear;
-      const month = this.viewMonth;
-      const firstDay = new Date(year, month, 1);
-      const lastDay = new Date(year, month + 1, 0);
-      const firstWeekday = firstDay.getDay();
-      const daysInMonth = lastDay.getDate();
-      // 上月填充
-      const prevLastDay = new Date(year, month, 0).getDate();
-      for (let i = firstWeekday - 1; i >= 0; i--) {
-        const d = prevLastDay - i;
-        const date = new Date(year, month - 1, d);
-        days.push({ key: `prev-${d}`, day: d, dateStr: this.fmt(date), inMonth: false, isToday: this.fmt(date) === this.todayStr, count: this.countForDate(this.fmt(date)) });
-      }
-      // 当月
-      for (let d = 1; d <= daysInMonth; d++) {
-        const date = new Date(year, month, d);
-        const ds = this.fmt(date);
-        days.push({ key: `cur-${d}`, day: d, dateStr: ds, inMonth: true, isToday: ds === this.todayStr, count: this.countForDate(ds) });
-      }
-      // 下月填充到42格
-      const remaining = 42 - days.length;
-      for (let d = 1; d <= remaining; d++) {
-        const date = new Date(year, month + 1, d);
-        days.push({ key: `next-${d}`, day: d, dateStr: this.fmt(date), inMonth: false, isToday: this.fmt(date) === this.todayStr, count: this.countForDate(this.fmt(date)) });
-      }
-      return days;
+    sortedCourses() {
+      const order = ['PRIVATE', 'PRACTICE', 'COMMUNITY', 'ADULT_GROUP', 'KID_GROUP', 'GYM', 'FITNESS'];
+      return [...this.courses].sort((a, b) => {
+        const ia = order.indexOf(a.business_type);
+        const ib = order.indexOf(b.business_type);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
     },
   },
   onShow() {
-    this.loadAllSessions();
+    this.loadCourses();
     this.loadBookings();
   },
   methods: {
-    back() { uni.navigateBack(); },
     bizName(code) { const b = BUSINESS_TYPES.find((x) => x.code === code); return b ? b.name : code; },
     bookingStatusName(s) { return BOOKING_STATUS[s] || s; },
-    setType(t) { this.businessType = t; this.loadAllSessions(); },
-    goPrivate(bt) { uni.navigateTo({ url: `/pages/member/booking/private?businessType=${bt}` }); },
-    selectDate(d) { this.selectedDate = d; this.filterList(); },
-    prevWeek() {
-      this.viewMonth--;
-      if (this.viewMonth < 0) { this.viewMonth = 11; this.viewYear--; }
-    },
-    nextWeek() {
-      this.viewMonth++;
-      if (this.viewMonth > 11) { this.viewMonth = 0; this.viewYear++; }
-    },
-    countForDate(dateStr) {
-      if (!this.allSessions) return 0;
-      return this.allSessions.filter((s) => s.date === dateStr).length;
-    },
-    filterList() {
-      if (!this.allSessions) { this.list = []; return; }
-      this.list = this.allSessions.filter((s) => s.date === this.selectedDate);
-    },
-    async loadAllSessions() {
-      try {
-        // 加载未来30天的可约课次
-        const params = {};
-        if (this.businessType) params.businessType = this.businessType;
-        this.allSessions = await api.availableSessions(params);
-        this.filterList();
-      } catch (e) { this.allSessions = []; this.list = []; }
+    colorFor(code) { return COLOR_MAP[code] || 'linear-gradient(135deg, #2d3436, #636e72)'; },
+    iconFor(code) { return ICON_MAP[code] || '课'; },
+    isPrivateType(code) { return code === 'PRIVATE' || code === 'PRACTICE'; },
+    async loadCourses() {
+      try { this.courses = await api.courseList(); } catch (e) { this.courses = []; }
     },
     async loadBookings() {
-      try { this.bookings = await api.myBookings(); } catch (e) {}
+      try { this.bookings = await api.myBookings(); } catch (e) { this.bookings = []; }
+    },
+    goCourse(c) {
+      if (this.isPrivateType(c.business_type)) {
+        // 私教/陪练跳转教练选择
+        uni.navigateTo({ url: `/pages/member/booking/private?businessType=${c.business_type}` });
+      } else {
+        // 其他课程展开一周可约课次
+        this.activeCourse = c;
+        this.selectedDate = this.weekDays[0].dateStr;
+        this.loadSessions();
+      }
+    },
+    selectDate(d) {
+      this.selectedDate = d;
+      this.loadSessions();
+    },
+    async loadSessions() {
+      if (!this.activeCourse) return;
+      try {
+        const list = await api.availableSessions({ courseId: this.activeCourse.id, date: this.selectedDate });
+        this.sessionList = list;
+      } catch (e) { this.sessionList = []; }
     },
     isBooked(id) { return this.bookings.some((b) => b.session_id === id && b.status === 'BOOKED'); },
     async bookSession(s) {
       try {
         await api.bookSession({ sessionId: s.id });
-        this.loadBookings(); this.loadAllSessions();
-        uni.showModal({
-          title: '预约成功',
-          content: `${s.course_name}\n${s.date} ${s.start_time}-${s.end_time}\n教练：${s.coach_name || '待定'}`,
-          showCancel: true,
-          cancelText: '关闭',
-          confirmText: '查看订单',
-          success: (res) => {
-            if (res.confirm) {
-              uni.navigateTo({ url: '/pages/member/orders/orders' });
-            }
-          },
-        });
-      } catch (e) {}
+        this.loadBookings(); this.loadSessions();
+        uni.showToast({ title: '预约成功', icon: 'success' });
+      } catch (e) {
+        if (e.message === 'NO_PACK' && e.data) {
+          this.showServiceWechat(e.data);
+        } else {
+          uni.showToast({ title: e.message || '预约失败', icon: 'none' });
+        }
+      }
     },
-    async cancelBooking(b) {
-      uni.showModal({
-        title: '确认取消',
-        content: `确定取消 ${b.course_name} 的预约吗？`,
-        success: async (res) => {
-          if (res.confirm) {
-            try {
-              await api.cancelBooking(b.id);
-              uni.showToast({ title: '已取消', icon: 'success' });
-              this.loadBookings(); this.loadAllSessions();
-            } catch (e) {}
-          }
-        },
-      });
+    showServiceWechat(data) {
+      this.serviceWechat = data.serviceWechat || '';
+      this.serviceWechatQr = data.serviceWechatQr || '';
+      this.serviceVisible = true;
+    },
+    copyWechat() {
+      if (this.serviceWechat) {
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          navigator.clipboard.writeText(this.serviceWechat);
+        }
+        uni.showToast({ title: '已复制', icon: 'success' });
+      }
     },
   },
 };
 </script>
 
 <style scoped>
-.page { min-height: 100vh; background: var(--bg); padding-bottom: 40rpx; }
-.header { display: flex; align-items: center; padding: 40rpx; }
-.back { font-size: 48rpx; color: var(--text-sec); margin-right: 24rpx; cursor: pointer; }
-.title { font-size: 40rpx; font-weight: 800; color: var(--text); }
-.filter-bar { display: flex; flex-wrap: wrap; padding: 0 32rpx; gap: 16rpx; margin-bottom: 20rpx; }
-.filter-item { padding: 12rpx 28rpx; border-radius: 12rpx; font-size: 26rpx; color: var(--text-sec); background: var(--card); }
-.filter-item.active { color: #fff; background: var(--primary); font-weight: 600; }
+.booking-panel { width: 100%; }
 
-.calendar { background: var(--card); border-radius: 24rpx; margin: 0 32rpx 24rpx 32rpx; padding: 24rpx; box-shadow: var(--sp-shadow); }
-.cal-header { display: flex; align-items: center; justify-content: center; margin-bottom: 20rpx; }
-.cal-nav { font-size: 40rpx; color: var(--text-sec); padding: 0 32rpx; cursor: pointer; }
-.cal-title { font-size: 32rpx; font-weight: 800; color: var(--text); }
-.cal-weekdays { display: flex; margin-bottom: 12rpx; }
-.cal-wd { width: 14.28%; text-align: center; font-size: 24rpx; color: var(--text-sec); font-weight: 600; }
-.cal-grid { display: flex; flex-wrap: wrap; }
-.cal-day { width: 14.28%; text-align: center; padding: 16rpx 0; cursor: pointer; box-sizing: border-box; }
-.day-num { font-size: 28rpx; color: var(--text); display: block; }
-.cal-day.other-month .day-num { color: #ccc; }
-.cal-day.today .day-num { color: var(--primary); font-weight: 800; }
-.cal-day.selected { background: rgba(255,77,40,0.1); border-radius: 12rpx; }
-.cal-day.selected .day-num { color: var(--primary); font-weight: 800; }
-.day-dot { font-size: 18rpx; color: #fff; background: var(--primary); border-radius: 20rpx; padding: 2rpx 10rpx; display: inline-block; margin-top: 4rpx; }
-.cal-day.other-month .day-dot { background: #ddd; }
+/* 课程色块网格 */
+.course-grid { display: flex; flex-wrap: wrap; padding: 0 24rpx; gap: 20rpx; }
+.course-block {
+  width: calc(33.33% - 14rpx);
+  height: 180rpx;
+  border-radius: 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--sp-shadow);
+  transition: transform 0.15s ease;
+}
+.course-block:active { transform: scale(0.97); }
+.block-icon { font-size: 48rpx; color: #fff; font-weight: 800; }
+.block-name { font-size: 24rpx; color: #fff; margin-top: 12rpx; font-weight: 600; }
 
-.selected-info { display: flex; justify-content: space-between; align-items: center; padding: 0 32rpx; margin-bottom: 20rpx; }
-.selected-date { font-size: 30rpx; font-weight: 700; color: var(--text); }
-.selected-count { font-size: 24rpx; color: var(--primary); font-weight: 600; }
+.empty { text-align: center; padding: 80rpx 0; }
+.empty-emoji { font-size: 72rpx; display: block; margin-bottom: 16rpx; }
+.empty-text { color: var(--text-sec); font-size: 28rpx; }
 
-.empty { text-align: center; color: var(--text-sec); padding: 80rpx; font-size: 28rpx; }
-.session-card { background: var(--card); border-radius: 24rpx; padding: 32rpx; margin: 0 32rpx 24rpx 32rpx; box-shadow: var(--sp-shadow); }
-.card-main { display: flex; align-items: flex-start; }
-.time-col { width: 150rpx; }
-.time-text { font-size: 32rpx; font-weight: 800; color: var(--text); display: block; }
-.time-end { font-size: 22rpx; color: var(--text-sec); display: block; margin-top: 8rpx; }
-.info-col { flex: 1; margin-left: 24rpx; }
-.info-head { margin-bottom: 12rpx; }
-.course-name { font-size: 32rpx; font-weight: 800; color: var(--text); }
-.biz-tag { font-size: 22rpx; color: var(--primary); background: rgba(255,77,40,0.08); padding: 4rpx 16rpx; border-radius: 8rpx; margin-left: 12rpx; }
-.info-meta { margin-bottom: 12rpx; }
-.meta-text { font-size: 24rpx; color: var(--text-sec); }
-.capacity { font-size: 26rpx; color: var(--text); font-weight: 700; }
-.card-action { margin-top: 24rpx; }
-.book-btn { width: 100%; height: 80rpx; line-height: 80rpx; font-size: 28rpx; border-radius: 16rpx; }
-.booked-tag { display: block; text-align: center; font-size: 28rpx; color: #2E7D5A; font-weight: 700; padding: 20rpx 0; }
-.my-bookings { margin: 40rpx 32rpx 0 32rpx; }
-.section-title { font-size: 32rpx; font-weight: 800; color: var(--text); margin-bottom: 24rpx; display: block; }
-.booking-row { display: flex; justify-content: space-between; align-items: center; background: var(--card); border-radius: 20rpx; padding: 28rpx; margin-bottom: 16rpx; box-shadow: var(--sp-shadow); }
-.booking-left { flex: 1; }
-.booking-course { font-size: 28rpx; font-weight: 700; color: var(--text); }
-.booking-time { display: block; font-size: 24rpx; color: var(--text-sec); margin-top: 8rpx; }
-.booking-right { display: flex; align-items: center; gap: 16rpx; }
-.booking-status { font-size: 24rpx; font-weight: 600; }
-.booking-status.BOOKED { color: #2E7D5A; }
-.booking-status.CANCELLED { color: #999; }
-.booking-status.ATTENDED { color: var(--primary); }
-.cancel-btn { width: auto; min-width: 80rpx; height: 56rpx; line-height: 56rpx; font-size: 24rpx; border-radius: 10rpx; background: #ff4d4f; color: #fff; }
+/* 课次区域 */
+.sessions-section { margin-top: 32rpx; }
+.course-banner { display: flex; justify-content: space-between; align-items: center; padding: 28rpx 32rpx; margin: 0 24rpx 24rpx 24rpx; border-radius: 20rpx; box-shadow: var(--sp-shadow); }
+.banner-name { font-size: 32rpx; font-weight: 800; color: #fff; }
+.banner-close { font-size: 32rpx; color: #fff; transition: transform 0.15s ease; }
+.banner-close:active { transform: scale(0.9); }
+
+/* 日期选择 */
+.date-scroll { width: 100%; white-space: nowrap; margin-bottom: 24rpx; }
+.date-tabs { display: inline-flex; padding: 0 24rpx; gap: 16rpx; }
+.date-tab { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 120rpx; padding: 20rpx 0; background: var(--card); border-radius: 20rpx; box-shadow: var(--sp-shadow-sm); transition: transform 0.15s ease; }
+.date-tab:active { transform: scale(0.97); }
+.date-tab.active { background: var(--grad-orange); box-shadow: var(--sp-shadow-orange); }
+.date-tab.active .dt-wd, .date-tab.active .dt-day { color: #fff; }
+.dt-wd { font-size: 22rpx; color: var(--text-sec); display: block; }
+.dt-day { font-size: 36rpx; font-weight: 800; color: var(--sp-dark); display: block; margin-top: 4rpx; }
+
+/* 课次卡片 */
+.session-card { background: var(--card); border-radius: 24rpx; padding: 28rpx; margin: 0 24rpx 20rpx 24rpx; box-shadow: var(--sp-shadow); display: flex; align-items: center; border-left: 8rpx solid var(--sp-orange); transition: transform 0.15s ease; }
+.session-card:active { transform: scale(0.97); }
+.session-card.disabled { opacity: 0.6; border-left-color: var(--text-sec); }
+.time-col { width: 120rpx; flex-shrink: 0; }
+.time-text { font-size: 32rpx; font-weight: 800; color: var(--sp-dark); display: block; }
+.time-end { font-size: 22rpx; color: var(--text-sec); display: block; margin-top: 6rpx; }
+.info-col { flex: 1; margin-left: 20rpx; min-width: 0; }
+.course-name { font-size: 28rpx; font-weight: 700; color: var(--sp-dark); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta-text { font-size: 24rpx; color: var(--text-sec); display: block; margin-top: 8rpx; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capacity { font-size: 24rpx; color: var(--sp-green); font-weight: 600; display: block; margin-top: 8rpx; white-space: nowrap; }
+.card-action { margin-left: 16rpx; flex-shrink: 0; }
+.book-btn { width: auto; height: 68rpx; line-height: 68rpx; font-size: 26rpx; border-radius: 100rpx; padding: 0 28rpx; white-space: nowrap; background: var(--grad-orange); color: #fff; font-weight: 700; box-shadow: var(--sp-shadow-orange); }
+.book-btn:active { transform: scale(0.97); }
+.booked-tag { font-size: 24rpx; color: var(--sp-green); font-weight: 700; white-space: nowrap; background: rgba(16,185,129,0.1); padding: 10rpx 20rpx; border-radius: 100rpx; }
+
+/* 客服微信开卡弹窗 */
+.service-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15,23,42,0.5); z-index: 999; display: flex; align-items: flex-end; }
+.service-sheet { width: 100%; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 24rpx 40rpx 48rpx; display: flex; flex-direction: column; align-items: center; animation: serviceUp 0.25s ease; }
+@keyframes serviceUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.service-handle { width: 64rpx; height: 8rpx; background: #E5E7EB; border-radius: 100rpx; margin-bottom: 28rpx; }
+.service-title { font-size: 36rpx; font-weight: 800; color: var(--sp-dark); margin-bottom: 16rpx; }
+.service-desc { font-size: 28rpx; color: var(--text-sec); text-align: center; line-height: 1.6; margin-bottom: 32rpx; }
+.service-qr-box { margin-bottom: 24rpx; }
+.service-qr { width: 360rpx; height: 360rpx; border-radius: 16rpx; }
+.service-wechat-box { display: flex; align-items: center; background: var(--sp-bg); border-radius: 16rpx; padding: 20rpx 28rpx; margin-bottom: 32rpx; }
+.service-wechat-label { font-size: 28rpx; color: var(--text-sec); }
+.service-wechat-value { font-size: 32rpx; font-weight: 700; color: var(--sp-dark); margin: 0 16rpx; }
+.service-copy { font-size: 26rpx; color: var(--sp-orange); font-weight: 600; padding: 8rpx 20rpx; background: var(--sp-bg-warm); border-radius: 100rpx; }
+.service-btn { width: 100%; height: 88rpx; line-height: 88rpx; border-radius: 24rpx; background: var(--grad-orange); color: #fff; font-size: 32rpx; font-weight: 700; box-shadow: var(--sp-shadow-orange); }
+.service-btn:active { transform: scale(0.97); }
 </style>

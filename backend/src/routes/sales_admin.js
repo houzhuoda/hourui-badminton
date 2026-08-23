@@ -42,6 +42,8 @@ router.post('/', authRole(['admin']), (req, res, next) => {
     const db = getDb();
     const exist = db.prepare('SELECT id FROM sales WHERE phone = ?').get(phone);
     if (exist) throw new BizError('手机号已存在', 409);
+    const coachExist = db.prepare('SELECT id FROM coaches WHERE phone = ?').get(phone);
+    if (coachExist) throw new BizError('该手机号已是教练账号，一个人不能同时属于销售和教练两种身份', 409);
     const id = uuid();
     db.prepare(`INSERT INTO sales (id, phone, password_hash, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)`)
       .run(id, phone, hashPassword(password), name, now(), now());
@@ -64,6 +66,8 @@ router.put('/:id', authRole(['admin']), (req, res, next) => {
       if (!/^\d{11}$/.test(phone)) throw new BizError('手机号格式错误');
       const exist = db.prepare('SELECT id FROM sales WHERE phone = ? AND id != ?').get(phone, req.params.id);
       if (exist) throw new BizError('手机号已存在', 409);
+      const coachExist = db.prepare('SELECT id FROM coaches WHERE phone = ?').get(phone);
+      if (coachExist) throw new BizError('该手机号已是教练账号，一个人不能同时属于销售和教练两种身份', 409);
       updates.push('phone = ?'); params.push(phone);
     }
     if (password) { updates.push('password_hash = ?'); params.push(hashPassword(password)); }

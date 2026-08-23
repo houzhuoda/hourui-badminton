@@ -1,18 +1,46 @@
 // 经营看板
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, DatePicker, Button } from 'antd';
+import { Card, Row, Col, Statistic, Table, Tag, DatePicker, Button, Modal, Spin } from 'antd';
 import { DollarOutlined, TeamOutlined, UserAddOutlined, ClockCircleOutlined, TrophyOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import dayjs from 'dayjs';
 import api from '../api';
 import { useMessage } from '../utils/useMessage';
 const { RangePicker } = DatePicker;
+
+const METRIC_CONFIG = [
+  { key: 'todayIncome', title: '今日收入', prefix: '￥', icon: null, color: null },
+  { key: 'monthIncome', title: '本月收入', prefix: '￥', icon: null, color: '#1890ff' },
+  { key: 'monthConsumption', title: '本月课消', suffix: '节', icon: null, color: null },
+  { key: 'consumedAmount', title: '已消课金额', prefix: '￥', icon: null, color: '#52c41a' },
+  { key: 'pendingConsumption', title: '待消课', suffix: '节', icon: null, color: '#faad14' },
+  { key: 'pendingAmount', title: '待消课金额', prefix: '￥', icon: null, color: '#faad14' },
+  { key: 'activeMembers', title: '在籍会员', icon: <TeamOutlined />, color: null },
+  { key: 'newMembers', title: '本月新增', icon: <UserAddOutlined />, color: '#52c41a' },
+  { key: 'expiringMembers', title: '本月到期', icon: <ClockCircleOutlined />, color: '#faad14' },
+  { key: 'activeCoaches', title: '活跃教练', icon: <TrophyOutlined />, color: null },
+];
+
+const METRIC_TITLES = {
+  todayIncome: '今日收入明细',
+  monthIncome: '本月收入明细',
+  monthConsumption: '本月课消明细',
+  consumedAmount: '已消课金额明细',
+  pendingConsumption: '待消课明细',
+  pendingAmount: '待消课金额明细',
+  activeMembers: '在籍会员明细',
+  newMembers: '本月新增会员明细',
+  expiringMembers: '本月到期会员明细',
+  activeCoaches: '活跃教练明细',
+};
 
 export default function Dashboard() {
   const message = useMessage();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState('month');
+  const [detailModal, setDetailModal] = useState(null);
+  const [detailData, setDetailData] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const loadData = async (r) => {
     setLoading(true);
@@ -24,6 +52,17 @@ export default function Dashboard() {
   };
 
   useEffect(() => { loadData(range); }, [range]);
+
+  const handleCardClick = async (type) => {
+    setDetailModal(type);
+    setDetailLoading(true);
+    setDetailData(null);
+    try {
+      const d = await api.get('/dashboard/detail', { params: { type } });
+      setDetailData(d);
+    } catch (e) { message.error(e.message); }
+    setDetailLoading(false);
+  };
 
   const trendOption = data?.trend ? {
     tooltip: { trigger: 'axis' },
@@ -46,6 +85,27 @@ export default function Dashboard() {
     }],
   } : null;
 
+  const renderMetricCard = (cfg) => {
+    const value = data?.metrics?.[cfg.key] ?? 0;
+    return (
+      <Col span={3} key={cfg.key}>
+        <Card
+          hoverable
+          style={{ cursor: 'pointer' }}
+          onClick={() => handleCardClick(cfg.key)}
+        >
+          <Statistic
+            title={<span style={{ color: '#1890ff' }}>{cfg.title} <span style={{ fontSize: 10, color: '#bbb' }}>▾</span></span>}
+            prefix={cfg.prefix === '￥' ? '￥' : cfg.icon}
+            value={value}
+            suffix={cfg.suffix}
+            valueStyle={cfg.color ? { color: cfg.color } : undefined}
+          />
+        </Card>
+      </Col>
+    );
+  };
+
   return (
     <div className="page-container">
       <div className="flex-between mb-24">
@@ -62,13 +122,10 @@ export default function Dashboard() {
       {data && (
         <>
           <Row gutter={16} className="mb-24">
-            <Col span={3}><Card><Statistic title="今日收入" prefix="￥" value={data.metrics.todayIncome} /></Card></Col>
-            <Col span={3}><Card><Statistic title="本月收入" prefix="￥" value={data.metrics.monthIncome} valueStyle={{ color: '#1890ff' }} /></Card></Col>
-            <Col span={3}><Card><Statistic title="本月课消" value={data.metrics.monthConsumption} suffix="节" /></Card></Col>
-            <Col span={3}><Card><Statistic title="在籍会员" value={data.metrics.activeMembers} prefix={<TeamOutlined />} /></Card></Col>
-            <Col span={3}><Card><Statistic title="本月新增" value={data.metrics.newMembers} prefix={<UserAddOutlined />} valueStyle={{ color: '#52c41a' }} /></Card></Col>
-            <Col span={3}><Card><Statistic title="本月到期" value={data.metrics.expiringMembers} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#faad14' }} /></Card></Col>
-            <Col span={3}><Card><Statistic title="活跃教练" value={data.metrics.activeCoaches} prefix={<TrophyOutlined />} /></Card></Col>
+            {METRIC_CONFIG.slice(0, 8).map(renderMetricCard)}
+          </Row>
+          <Row gutter={16} className="mb-24">
+            {METRIC_CONFIG.slice(8).map(renderMetricCard)}
           </Row>
 
           <Row gutter={16} className="mb-24">
@@ -95,13 +152,32 @@ export default function Dashboard() {
                 { title: '课程', dataIndex: 'course_name', key: 'course_name' },
                 { title: '到期日', dataIndex: 'valid_until', key: 'valid_until', render: (v) => <Tag color="orange">{v}</Tag> },
                 { title: '剩余', key: 'remaining', render: (_, r) => r.pack_type === 'SESSION_PACK' ? `${r.remaining_sessions}节` : `${r.monthly_remaining}次` },
-                { title: '预存余额', dataIndex: 'total_balance', key: 'total_balance', render: (v) => v ? `￥${v}` : '-' },
                 { title: '操作', key: 'action', render: () => <Button size="small" type="link">提醒续费</Button> },
               ]}
             />
           </Card>
         </>
       )}
+
+      <Modal
+        title={METRIC_TITLES[detailModal] || '明细'}
+        open={!!detailModal}
+        onCancel={() => setDetailModal(null)}
+        footer={null}
+        width={900}
+      >
+        {detailLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : detailData ? (
+          <Table
+            dataSource={detailData.rows || []}
+            columns={detailData.columns || []}
+            rowKey={(r, i) => r.id || r.pack_id || i}
+            size="small"
+            pagination={{ pageSize: 10, showSizeChanger: false }}
+          />
+        ) : null}
+      </Modal>
     </div>
   );
 }

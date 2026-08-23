@@ -14,6 +14,7 @@ import MemberAssets from './pages/member/assets/assets.vue';
 import MemberBooking from './pages/member/booking/booking.vue';
 import MemberPrivateBooking from './pages/member/booking/private.vue';
 import MemberBookingDetail from './pages/member/booking/detail.vue';
+import MemberBookings from './pages/member/bookings/bookings.vue';
 import MemberHistory from './pages/member/history/history.vue';
 import MemberProfile from './pages/member/profile/profile.vue';
 import MemberOrders from './pages/member/orders/orders.vue';
@@ -30,6 +31,13 @@ import CoachStats from './pages/coach/stats/stats.vue';
 import CoachCreateMember from './pages/coach/sales/create-member.vue';
 import CoachCreateOrder from './pages/coach/sales/create-order.vue';
 import CoachPrivateBookings from './pages/coach/private-bookings/private-bookings.vue';
+import CoachSalesDashboard from './pages/coach/sales/dashboard.vue';
+import CoachSalesMembers from './pages/coach/sales/members.vue';
+import CoachSalesMemberDetail from './pages/coach/sales/member-detail.vue';
+import CoachSalesOrders from './pages/coach/sales/orders.vue';
+import CoachSalesPerformance from './pages/coach/sales/performance.vue';
+import CoachSalesChannels from './pages/coach/sales/channels.vue';
+import SalesChannels from './pages/sales/channels/channels.vue';
 
 // 路由表：所有 key 都带 /pages/ 前缀
 const routes = markRaw({
@@ -41,6 +49,7 @@ const routes = markRaw({
   '/pages/member/booking/booking': MemberBooking,
   '/pages/member/booking/private': MemberPrivateBooking,
   '/pages/member/booking/detail': MemberBookingDetail,
+  '/pages/member/bookings/bookings': MemberBookings,
   '/pages/member/history/history': MemberHistory,
   '/pages/member/profile/profile': MemberProfile,
   '/pages/member/orders/orders': MemberOrders,
@@ -51,12 +60,19 @@ const routes = markRaw({
   '/pages/sales/orders/create': SalesOrderCreate,
   '/pages/sales/orders/list': SalesOrderList,
   '/pages/sales/performance/performance': SalesPerformance,
+  '/pages/sales/channels/channels': SalesChannels,
   '/pages/coach/schedule/schedule': CoachSchedule,
   '/pages/coach/attendance/attendance': CoachAttendance,
   '/pages/coach/stats/stats': CoachStats,
   '/pages/coach/sales/create-member': CoachCreateMember,
   '/pages/coach/sales/create-order': CoachCreateOrder,
   '/pages/coach/private-bookings/private-bookings': CoachPrivateBookings,
+  '/pages/coach/sales/dashboard': CoachSalesDashboard,
+  '/pages/coach/sales/members': CoachSalesMembers,
+  '/pages/coach/sales/member-detail': CoachSalesMemberDetail,
+  '/pages/coach/sales/orders': CoachSalesOrders,
+  '/pages/coach/sales/performance': CoachSalesPerformance,
+  '/pages/coach/sales/channels': CoachSalesChannels,
 });
 
 const RouterView = defineComponent({
@@ -121,3 +137,4 @@ app.mixin({
 });
 
 app.mount('#app');
+// build 1787463415

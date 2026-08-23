@@ -32,7 +32,7 @@ describe('订单服务异常分支', () => {
   });
 
   it('不存在的会员', () => {
-    expect(() => createOrder({ memberId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true }, operator)).toThrow();
+    expect(() => createOrder({ memberId: 'nonexistent', businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', confirmed: true }, operator)).toThrow();
   });
 
   it('缺少业务类型或收费模式', () => {
@@ -99,14 +99,17 @@ describe('数据库约束异常', () => {
   });
 
   it('使用其他角色处理订单', () => {
-    const m = createMember({ name: '销售测试', phone: '13900008011', categoryCode: 'M_PRIVATE' }, operator);
+    const salesOp = { id: 'sales-1', type: 'sales', name: '销售' };
+    const m = createMember({ name: '销售测试', phone: '13900008011', categoryCode: 'M_PRIVATE' }, salesOp);
     const course = getCourse('PRIVATE');
     const sp = getSP(course.id);
-    const salesOp = { id: 'sales-1', type: 'sales', name: '销售' };
     const order = createOrder({ memberId: m.id, courseId: course.id, businessType: 'PRIVATE', chargeMode: 'SESSION_PACK', sessionPricingId: sp.id, confirmed: true }, salesOp);
     expect(order.commissionAmount).toBeGreaterThan(0);
+    // 课后计提模式：开单时不记录提成，出勤后才记录
     const db = getDb();
-    const record = db.prepare('SELECT * FROM commission_records WHERE order_id = ? AND beneficiary_type = ?').get(order.orderId, 'sales');
-    expect(record).toBeTruthy();
+    const orderRow = db.prepare('SELECT sales_id, sales_type, commission_rate FROM orders WHERE id = ?').get(order.orderId);
+    expect(orderRow.sales_id).toBe('sales-1');
+    expect(orderRow.sales_type).toBe('sales');
+    expect(orderRow.commission_rate).toBeGreaterThan(0);
   });
 });

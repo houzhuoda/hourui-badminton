@@ -36,4 +36,5 @@ export const api = {
   requestLeave: (data) => request('/member-end/leave-request', { method: 'POST', data }),
   leaveTypes: () => request('/member-end/leave-types'),
   myInfo: () => request('/member-end/my-info'),
+  courses: (params) => request('/courses', { data: params }),
 };

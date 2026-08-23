@@ -1,5 +1,5 @@
 // 出勤核销服务（核心业务逻辑）
-// COA-003/004/005：教练出勤登记 → 自动核销（次卡/预存/月卡）→ 计入教练统计
+// COA-003/004/005：教练出勤登记 → 自动核销（次卡/月卡）→ 计入教练统计
 // GNR-001：幂等，不允许重复扣费
 import { getDb } from '../db/index.js';
 import { uuid, now, currentMonth, addMonths } from '../utils/helpers.js';
@@ -10,7 +10,6 @@ import { BizError } from '../middleware/error.js';
 // 获取学员可用资产（用于出勤前校验）
 export function getMemberAssetsForAttendance(memberId, businessType) {
   const db = getDb();
-  const prepaid = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(memberId);
   // 优先匹配同业务类型的有效次卡/月卡
   const packs = db.prepare(`SELECT * FROM packs WHERE member_id = ? AND status = 'ACTIVE' AND valid_until >= date('now') AND (business_type = ? OR ? IS NULL) ORDER BY created_at ASC`).all(memberId, businessType, businessType);
   const sessionPack = packs.find((p) => p.pack_type === 'SESSION_PACK' && p.remaining_sessions > 0);
@@ -27,35 +26,30 @@ export function getMemberAssetsForAttendance(memberId, businessType) {
     }
   }
   return {
-    prepaid: prepaid || { principal_balance: 0, gift_balance: 0, total_balance: 0 },
     sessionPack,
     monthlyPack,
     monthlyAvailable,
-    hasAsset: (sessionPack && sessionPack.remaining_sessions > 0) || (monthlyAvailable > 0) || (prepaid && prepaid.total_balance > 0),
+    hasAsset: (sessionPack && sessionPack.remaining_sessions > 0) || (monthlyAvailable > 0),
   };
 }
 
 // 核销逻辑（GNR-001 幂等）
 function consumeAsset(db, memberId, businessType, courseId, sessionId, orderId, operator) {
   const assets = getMemberAssetsForAttendance(memberId, businessType);
-  // 优先级：月卡当月额度 > 次卡 > 预存
+  // 优先级：月卡当月额度 > 次卡
   if (assets.monthlyPack && assets.monthlyAvailable > 0) {
     return consumeMonthly(db, assets.monthlyPack, memberId, sessionId, orderId, operator);
   }
   if (assets.sessionPack && assets.sessionPack.remaining_sessions > 0) {
     return consumeSessionPack(db, assets.sessionPack, memberId, sessionId, orderId, operator);
   }
-  if (assets.prepaid && assets.prepaid.total_balance > 0) {
-    // 需要课程单价
-    const course = courseId ? db.prepare('SELECT standard_price FROM courses WHERE id = ?').get(courseId) : null;
-    const price = course?.standard_price || 0;
-    if (price === 0) throw new BizError('预存核销需课程单价');
-    return consumePrepaid(db, assets.prepaid, memberId, sessionId, orderId, price, operator);
-  }
   return null; // 无可用资产
 }
 
 function consumeSessionPack(db, pack, memberId, sessionId, orderId, operator) {
+  // 判断当前消费的是否是赠送课时（先消费购买课时，后消费赠送课时）
+  const purchasedSessions = pack.total_sessions - pack.gift_sessions;
+  const isGiftSession = pack.used_sessions >= purchasedSessions;
   const newRemaining = pack.remaining_sessions - 1;
   const newUsed = pack.used_sessions + 1;
   const status = newRemaining === 0 ? PACK_STATUS.CONSUMED : PACK_STATUS.ACTIVE;
@@ -64,7 +58,7 @@ function consumeSessionPack(db, pack, memberId, sessionId, orderId, operator) {
   const consumptionId = uuid();
   db.prepare(`INSERT INTO pack_consumptions (id, pack_id, member_id, session_id, order_id, sessions_used, amount, charge_mode, created_at) VALUES (?, ?, ?, ?, ?, 1, 0, 'SESSION_PACK', ?)`)
     .run(consumptionId, pack.id, memberId, sessionId, orderId, now());
-  return { consumptionId, packId: pack.id, chargeMode: 'SESSION_PACK', amount: 0, sessionsUsed: 1 };
+  return { consumptionId, packId: pack.id, chargeMode: 'SESSION_PACK', amount: 0, sessionsUsed: 1, isGiftSession };
 }
 
 function consumeMonthly(db, pack, memberId, sessionId, orderId, operator) {
@@ -86,35 +80,6 @@ function consumeMonthly(db, pack, memberId, sessionId, orderId, operator) {
   return { consumptionId, packId: pack.id, chargeMode: 'MONTHLY', amount: 0, sessionsUsed: 1 };
 }
 
-function consumePrepaid(db, account, memberId, sessionId, orderId, price, operator) {
-  // 扣费顺序：先扣本金，再扣赠送（Q-01）
-  let remaining = price;
-  let principalPart = 0;
-  let giftPart = 0;
-  if (account.principal_balance >= remaining) {
-    principalPart = remaining;
-    remaining = 0;
-  } else {
-    principalPart = account.principal_balance;
-    remaining -= account.principal_balance;
-    giftPart = Math.min(remaining, account.gift_balance);
-    remaining -= giftPart;
-  }
-  if (remaining > 0) throw new BizError('预存余额不足');
-
-  const newPrincipal = account.principal_balance - principalPart;
-  const newGift = account.gift_balance - giftPart;
-  const newTotal = newPrincipal + newGift;
-  db.prepare('UPDATE prepaid_accounts SET principal_balance = ?, gift_balance = ?, total_balance = ?, updated_at = ? WHERE id = ?')
-    .run(newPrincipal, newGift, newTotal, now(), account.id);
-  db.prepare(`INSERT INTO prepaid_transactions (id, account_id, member_id, session_id, type, principal_delta, gift_delta, amount, balance_after, created_at) VALUES (?, ?, ?, ?, 'CONSUME', ?, ?, ?, ?, ?)`)
-    .run(uuid(), account.id, memberId, sessionId, -principalPart, -giftPart, price, newTotal, now());
-  const consumptionId = uuid();
-  db.prepare(`INSERT INTO pack_consumptions (id, pack_id, member_id, session_id, order_id, sessions_used, amount, principal_part, gift_part, charge_mode, created_at) VALUES (?, NULL, ?, ?, ?, 0, ?, ?, ?, 'PREPAID', ?)`)
-    .run(consumptionId, memberId, sessionId, orderId, price, principalPart, giftPart, now());
-  return { consumptionId, packId: null, chargeMode: 'PREPAID', amount: price, principalPart, giftPart };
-}
-
 // 获取教练费率
 function getCoachRate(db, coachId, businessType) {
   const rate = db.prepare('SELECT * FROM coach_rates WHERE coach_id = ? AND business_type = ?').get(coachId, businessType);
@@ -127,14 +92,22 @@ export function submitAttendance(sessionId, attendanceList, operator) {
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
   if (!session) throw new BizError('课次不存在', 404);
   if (session.status === SESSION_STATUS.CANCELLED) throw new BizError('课次已取消');
-  // 幂等：课次已完成时，返回已存在的出勤记录（不抛错，不重复扣费）
+  // 幂等：课次已完成时，对已有出勤记录的会员跳过，但仍允许补登未登记的会员
   if (session.status === SESSION_STATUS.COMPLETED) {
     const existing = db.prepare('SELECT member_id, status FROM attendance WHERE session_id = ?').all(sessionId);
-    return {
-      sessionId,
-      results: existing.map((a) => ({ memberId: a.member_id, status: a.status, skipped: true, reason: '课次已完成' })),
-      skipped: true,
-    };
+    const existingMap = {};
+    existing.forEach((a) => { existingMap[a.member_id] = a; });
+    // 过滤出还没有出勤记录的会员
+    const newItems = (attendanceList || []).filter((item) => item.memberId && !existingMap[item.memberId]);
+    if (newItems.length === 0) {
+      return {
+        sessionId,
+        results: existing.map((a) => ({ memberId: a.member_id, status: a.status, skipped: true, reason: '课次已完成' })),
+        skipped: true,
+      };
+    }
+    // 有未登记的会员，继续处理
+    attendanceList = newItems;
   }
 
   const course = db.prepare('SELECT * FROM courses WHERE id = ?').get(session.course_id);
@@ -164,6 +137,7 @@ export function submitAttendance(sessionId, attendanceList, operator) {
             finalStatus = ATTENDANCE_STATUS.PENDING_PAY;
           }
         } catch (e) {
+          console.error('[attendance] 核销失败 member=%s bt=%s:', memberId, session.business_type, e.message);
           finalStatus = ATTENDANCE_STATUS.PENDING_PAY;
         }
       }
@@ -171,11 +145,41 @@ export function submitAttendance(sessionId, attendanceList, operator) {
       // 计算教练课时费/分成（仅出勤状态）
       let lessonFee = 0;
       let shareAmount = 0;
+      let salesCommissionAmount = 0;
       if (finalStatus === ATTENDANCE_STATUS.PRESENT) {
-        lessonFee = coachRate.lesson_fee || 0;
-        // 分成 = 课程收入 × 分成比例（课程收入取标准单价）
-        const courseIncome = course?.standard_price || 0;
-        shareAmount = Math.round(courseIncome * (coachRate.share_rate || 0) / 100);
+        // 判断是否为赠送课时
+        const isGiftSession = consumptionResult?.isGiftSession || false;
+        // 赠送课时且未开启赠送提成时，不计算课时费和分成
+        const skipCommission = isGiftSession && !coachRate.gift_commission;
+        if (!skipCommission) {
+          lessonFee = coachRate.lesson_fee || 0;
+          // 分成 = 课程收入 × 分成比例（课程收入取标准单价）
+          const courseIncome = course?.standard_price || 0;
+          shareAmount = Math.round(courseIncome * (coachRate.share_rate || 0) / 100);
+          // 销售提成：按节计提（课后计提）
+          // 每节提成 = 订单预估总提成 / 课包总节数（保证总提成 = 预估提成）
+          if (consumptionResult?.packId) {
+            const pack = db.prepare('SELECT order_id, total_sessions, gift_sessions, monthly_quota FROM packs WHERE id = ?').get(consumptionResult.packId);
+            if (pack?.order_id) {
+              const order = db.prepare('SELECT id, sales_id, sales_type, sales_name, commission_rate, commission_type, business_type, status, commission_amount, amount FROM orders WHERE id = ?').get(pack.order_id);
+              if (order && order.status === 'PAID' && order.sales_id && order.commission_rate > 0 && order.sales_type !== 'admin') {
+                // 用订单预估总提成 / 非赠送总节数 = 每节提成
+                // 赠送课时跳过提成，所以分母用非赠送节数，确保非赠送课全消完后总提成 = 预估提成
+                const nonGiftSessions = pack.total_sessions ? (pack.total_sessions - (pack.gift_sessions || 0)) : (pack.monthly_quota || 0);
+                if (nonGiftSessions > 0 && order.commission_amount > 0) {
+                  salesCommissionAmount = Math.round(order.commission_amount / nonGiftSessions);
+                } else {
+                  // 回退：按课程标准单价 × 提成率
+                  salesCommissionAmount = Math.round((course?.standard_price || 0) * order.commission_rate / 100);
+                }
+                // 记录销售提成（课后计提）
+                db.prepare(`INSERT INTO commission_records (id, order_id, beneficiary_id, beneficiary_type, beneficiary_name, commission_type, business_type, rate, amount, status, session_id, created_at) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`)
+                  .run(uuid(), order.id, order.sales_id, order.sales_type, order.sales_name, order.commission_type, order.business_type, order.commission_rate, salesCommissionAmount, sessionId, now());
+              }
+            }
+          }
+        }
       }
 
       const attId = uuid();
@@ -200,8 +204,12 @@ export function submitAttendance(sessionId, attendanceList, operator) {
       });
     }
 
-    // 标记课次完成
-    db.prepare('UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?').run(SESSION_STATUS.COMPLETED, now(), sessionId);
+    // 仅当所有已预约会员都有出勤记录时，才标记课次完成
+    const totalBookings = db.prepare("SELECT COUNT(*) as cnt FROM bookings WHERE session_id = ? AND status IN ('BOOKED', 'ATTENDED', 'NOSHOW')").get(sessionId);
+    const totalAttendance = db.prepare('SELECT COUNT(*) as cnt FROM attendance WHERE session_id = ?').get(sessionId);
+    if (totalBookings.cnt === 0 || totalAttendance.cnt >= totalBookings.cnt) {
+      db.prepare('UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?').run(SESSION_STATUS.COMPLETED, now(), sessionId);
+    }
 
     writeAudit({ entity: 'session', entityId: sessionId, action: 'ATTENDANCE_SUBMIT', operator, detail: { results } });
     return { sessionId, results };
@@ -228,10 +236,35 @@ export function updateAttendance(sessionId, memberId, newStatus, operator, reaso
       // 计算课时费
       const coachRate = getCoachRate(db, att.coach_id, session.business_type);
       const course = db.prepare('SELECT standard_price FROM courses WHERE id = ?').get(session.course_id);
-      const lessonFee = coachRate.lesson_fee || 0;
-      const shareAmount = Math.round((course?.standard_price || 0) * (coachRate.share_rate || 0) / 100);
+      const isGiftSession = consumptionResult?.isGiftSession || false;
+      const skipCommission = isGiftSession && !coachRate.gift_commission;
+      const lessonFee = skipCommission ? 0 : (coachRate.lesson_fee || 0);
+      const shareAmount = skipCommission ? 0 : Math.round((course?.standard_price || 0) * (coachRate.share_rate || 0) / 100);
       db.prepare('UPDATE attendance SET status = ?, pack_id = ?, consumption_id = ?, lesson_fee = ?, share_amount = ?, updated_at = ? WHERE id = ?')
         .run(newStatus, consumptionResult?.packId, consumptionResult?.consumptionId, lessonFee, shareAmount, now(), att.id);
+
+      // 补记销售提成（课后计提）
+      if (!skipCommission && consumptionResult?.packId) {
+        const pack = db.prepare('SELECT order_id, total_sessions, gift_sessions, monthly_quota FROM packs WHERE id = ?').get(consumptionResult.packId);
+        if (pack?.order_id) {
+          const order = db.prepare('SELECT id, sales_id, sales_type, sales_name, commission_rate, commission_type, business_type, status, commission_amount FROM orders WHERE id = ?').get(pack.order_id);
+          if (order && order.status === 'PAID' && order.sales_id && order.commission_rate > 0 && order.sales_type !== 'admin') {
+            // 幂等：检查是否已存在该课次的提成记录
+            const exist = db.prepare('SELECT id FROM commission_records WHERE session_id = ? AND beneficiary_id = ? AND status = ?').get(sessionId, order.sales_id, 'ACTIVE');
+            if (!exist) {
+              const nonGiftSessions = pack.total_sessions ? (pack.total_sessions - (pack.gift_sessions || 0)) : (pack.monthly_quota || 0);
+              let salesCommissionAmount = 0;
+              if (nonGiftSessions > 0 && order.commission_amount > 0) {
+                salesCommissionAmount = Math.round(order.commission_amount / nonGiftSessions);
+              } else {
+                salesCommissionAmount = Math.round((course?.standard_price || 0) * order.commission_rate / 100);
+              }
+              db.prepare(`INSERT INTO commission_records (id, order_id, beneficiary_id, beneficiary_type, beneficiary_name, commission_type, business_type, rate, amount, status, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`)
+                .run(uuid(), order.id, order.sales_id, order.sales_type, order.sales_name, order.commission_type, order.business_type, order.commission_rate, salesCommissionAmount, sessionId, now());
+            }
+          }
+        }
+      }
     } else {
       db.prepare('UPDATE attendance SET status = ?, updated_at = ? WHERE id = ?').run(newStatus, now(), att.id);
     }

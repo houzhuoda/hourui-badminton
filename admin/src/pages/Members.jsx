@@ -1,5 +1,5 @@
 // 会员管理列表
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Table, Button, Input, Select, Space, Card, Tag, Modal, Form } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -16,6 +16,14 @@ export default function Members() {
   const [createModal, setCreateModal] = useState(false);
   const [form] = Form.useForm();
   const [channels, setChannels] = useState([]);
+  const searchTimer = useRef(null);
+
+  // 边输入边搜索（debounce 300ms）
+  const onKeywordChange = useCallback((e) => {
+    const v = e.target.value;
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setParams((prev) => ({ ...prev, keyword: v, page: 1 })), 300);
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -55,7 +63,9 @@ export default function Members() {
 
       <Card className="mb-16">
         <Space wrap>
-          <Input.Search placeholder="姓名/手机号" allowClear style={{ width: 200 }} onSearch={(v) => setParams({ ...params, keyword: v, page: 1 })} />
+          <Input.Search placeholder="姓名/手机号" allowClear style={{ width: 200 }}
+            onChange={onKeywordChange}
+            onSearch={(v) => setParams({ ...params, keyword: v, page: 1 })} />
           <Select placeholder="会员分类" allowClear style={{ width: 150 }} onChange={(v) => setParams({ ...params, categoryCode: v, page: 1 })}
             options={MEMBER_CATEGORIES.map((c) => ({ label: c.name, value: c.code }))} />
           <Select placeholder="状态" allowClear style={{ width: 100 }} onChange={(v) => setParams({ ...params, status: v, page: 1 })}

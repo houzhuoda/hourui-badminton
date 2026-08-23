@@ -6,6 +6,8 @@
     { "path": "pages/member/assets/assets", "style": { "navigationBarTitleText": "我的资产" } },
     { "path": "pages/member/booking/booking", "style": { "navigationBarTitleText": "约课" } },
     { "path": "pages/member/booking/detail", "style": { "navigationBarTitleText": "课次详情" } },
+    { "path": "pages/member/booking/private", "style": { "navigationBarTitleText": "私教/陪练" } },
+    { "path": "pages/member/bookings/bookings", "style": { "navigationBarTitleText": "我的预约" } },
     { "path": "pages/member/history/history", "style": { "navigationBarTitleText": "消费记录" } },
     { "path": "pages/member/profile/profile", "style": { "navigationBarTitleText": "我的" } },
     { "path": "pages/sales/dashboard/dashboard", "style": { "navigationBarTitleText": "工作台" } },
@@ -15,11 +17,18 @@
     { "path": "pages/sales/orders/create", "style": { "navigationBarTitleText": "购课开单" } },
     { "path": "pages/sales/orders/list", "style": { "navigationBarTitleText": "订单列表" } },
     { "path": "pages/sales/performance/performance", "style": { "navigationBarTitleText": "我的业绩" } },
+    { "path": "pages/sales/channels/channels", "style": { "navigationBarTitleText": "渠道分析" } },
     { "path": "pages/coach/attendance/attendance", "style": { "navigationBarTitleText": "出勤核销" } },
     { "path": "pages/coach/sales/create-member", "style": { "navigationBarTitleText": "新建会员" } },
     { "path": "pages/coach/sales/create-order", "style": { "navigationBarTitleText": "购课开单" } },
     { "path": "pages/coach/schedule/schedule", "style": { "navigationBarTitleText": "我的课表" } },
-    { "path": "pages/coach/stats/stats", "style": { "navigationBarTitleText": "我的统计" } }
+    { "path": "pages/coach/stats/stats", "style": { "navigationBarTitleText": "我的统计" } },
+    { "path": "pages/coach/sales/dashboard", "style": { "navigationBarTitleText": "销售工作台" } },
+    { "path": "pages/coach/sales/members", "style": { "navigationBarTitleText": "会员管理" } },
+    { "path": "pages/coach/sales/member-detail", "style": { "navigationBarTitleText": "会员详情" } },
+    { "path": "pages/coach/sales/orders", "style": { "navigationBarTitleText": "订单列表" } },
+    { "path": "pages/coach/sales/performance", "style": { "navigationBarTitleText": "业绩统计" } },
+    { "path": "pages/coach/sales/channels", "style": { "navigationBarTitleText": "渠道分析" } }
   ],
   "globalStyle": {
     "navigationBarTextStyle": "white",

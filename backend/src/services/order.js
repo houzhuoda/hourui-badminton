@@ -1,4 +1,4 @@
-// 订单服务：购课开单（三种收费模式）+ 提成计算 + 退款
+// 订单服务：购课开单（次卡/月卡/单次）+ 提成计算 + 退款
 import { getDb } from '../db/index.js';
 import {
   uuid, now, generateOrderNo, formatDate, addDays, addMonths, currentMonth,
@@ -16,33 +16,9 @@ export function determineCommissionType(memberId) {
 }
 
 // ============ 计算折扣（取最优，不叠加 Q-09） ============
+// 折扣功能已取消：次卡/月卡只有送课优惠，不再支持折扣
 export function calculateBestDiscount({ businessType, courseId, amount, isNew, db }) {
-  const today = formatDate();
-  const rules = db.prepare(`
-    SELECT * FROM discount_rules 
-    WHERE status = 'ACTIVE' 
-      AND (business_type = ? OR business_type IS NULL)
-      AND (course_id = ? OR course_id IS NULL)
-      AND (start_date IS NULL OR start_date <= ?)
-      AND (end_date IS NULL OR end_date >= ?)
-      AND (target = 'ALL' OR target = ?)
-  `).all(businessType, courseId, today, today, isNew ? 'NEW' : 'ALL');
-
-  let bestAmount = amount;
-  let bestRule = null;
-  for (const r of rules) {
-    let discounted = amount;
-    if (r.discount_type === 'RATE') {
-      discounted = Math.round(amount * (100 - r.discount_value) / 100);
-    } else if (r.discount_type === 'FIXED') {
-      discounted = r.discount_value;
-    }
-    if (discounted < bestAmount) {
-      bestAmount = discounted;
-      bestRule = r;
-    }
-  }
-  return { finalAmount: bestAmount, discountAmount: amount - bestAmount, appliedRule: bestRule };
+  return { finalAmount: amount, discountAmount: 0, appliedRule: null };
 }
 
 // ============ 获取销售提成比例 ============
@@ -56,8 +32,6 @@ export function getCommissionRate(businessType, commissionType) {
 export function createOrder(data, operator) {
   const {
     memberId, courseId, businessType, chargeMode,
-    // 预存模式
-    depositAmount,
     // 次卡模式
     sessionPricingId,
     // 月卡模式
@@ -81,6 +55,10 @@ export function createOrder(data, operator) {
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(memberId);
   if (!member) throw new BizError('会员不存在', 404);
   if (member.status !== 'ACTIVE') throw new BizError('会员已停用，不可开单');
+  // 销售/教练只能为本人建档的会员开单（防止抢单）
+  if (operator && (operator.type === 'sales' || operator.type === 'coach') && member.creator_id && member.creator_id !== operator.id) {
+    throw new BizError('该会员由其他销售/教练建档，无权开单');
+  }
 
   const course = courseId ? db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId) : null;
   if (courseId && !course) throw new BizError('课程不存在');
@@ -97,21 +75,15 @@ export function createOrder(data, operator) {
     let packId = null;       // 生成的课包 id（如有）
     let orderDetail = {};    // 订单详情
     let packInsert = null;   // 延迟创建课包的 SQL 和参数
+    let extraPackInsert = null; // 额外赠送课包（跨业务类型）
 
-    if (chargeMode === 'PREPAID') {
-      // 预存赠送模式
-      if (!depositAmount || depositAmount <= 0) throw new BizError('预存金额必填');
-      const rule = db.prepare('SELECT * FROM prepaid_rules WHERE deposit_amount = ? AND status = ?').get(depositAmount, 'ACTIVE');
-      const giftAmount = rule ? rule.gift_amount : 0;
-      amount = depositAmount;
-      originalAmount = depositAmount;
-      giftValue = giftAmount;
-      orderDetail = { depositAmount, giftAmount, totalBalance: depositAmount + giftAmount };
-
-    } else if (chargeMode === 'SESSION_PACK') {
+    if (chargeMode === 'SESSION_PACK') {
       // 次卡模式
       let totalSessions = 0;
       let unitPrice = standardPrice;
+      let extraGiftBusinessType = null;
+      let extraGiftSessions = 0;
+      let extraGiftCourseId = null;
       if (sessionPricingId) {
         const sp = db.prepare('SELECT * FROM course_session_pricing WHERE id = ? AND status = ?').get(sessionPricingId, 'ACTIVE');
         if (!sp) throw new BizError('次卡档位不存在');
@@ -123,8 +95,16 @@ export function createOrder(data, operator) {
         sessions = sp.sessions;
         price = sp.price;
         unitPrice = standardPrice;
+        // 额外赠送（跨业务类型）
+        extraGiftBusinessType = sp.extra_gift_business_type || null;
+        extraGiftSessions = sp.extra_gift_sessions || 0;
+        if (extraGiftBusinessType && extraGiftSessions > 0) {
+          const extraCourse = db.prepare("SELECT * FROM courses WHERE business_type = ? AND status = 'ACTIVE' ORDER BY created_at LIMIT 1").get(extraGiftBusinessType);
+          extraGiftCourseId = extraCourse?.id || null;
+          giftValue += extraGiftSessions * (extraCourse?.standard_price || 0);
+        }
       } else {
-        if (!sessions || price === undefined) throw new BizError('节数和价格必填');
+        if (!sessions || price === undefined) throw new BizError('请选择次卡档位（或填写节数和价格）');
         totalSessions = sessions + (giftSessions || 0);
         amount = price;
         originalAmount = price;
@@ -133,7 +113,7 @@ export function createOrder(data, operator) {
       // 折扣（取最优）
       const disc = calculateBestDiscount({ businessType, courseId, amount, isNew, db });
       amount = disc.finalAmount;
-      orderDetail = { sessions, giftSessions: giftSessions || 0, totalSessions, price: amount, unitPrice, discount: disc };
+      orderDetail = { sessions, giftSessions: giftSessions || 0, totalSessions, price: amount, unitPrice, discount: disc, extraGiftBusinessType, extraGiftSessions };
 
       // 准备课包数据（延迟到订单创建后插入）
       const today = formatDate();
@@ -143,16 +123,36 @@ export function createOrder(data, operator) {
         sql: `INSERT INTO packs (id, member_id, order_id, course_id, business_type, pack_type, total_sessions, used_sessions, remaining_sessions, gift_sessions, unit_price, valid_from, valid_until, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'SESSION_PACK', ?, 0, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
         params: [packId, memberId, '', courseId || null, businessType, totalSessions, totalSessions, giftSessions || 0, unitPrice, today, validUntil, now(), now()],
       };
+      // 额外赠送课包（跨业务类型，如买私教送陪练）
+      if (extraGiftBusinessType && extraGiftSessions > 0) {
+        const extraPackId = uuid();
+        const extraUnitPrice = db.prepare("SELECT standard_price FROM courses WHERE business_type = ? AND status = 'ACTIVE' ORDER BY created_at LIMIT 1").get(extraGiftBusinessType)?.standard_price || 0;
+        extraPackInsert = {
+          sql: `INSERT INTO packs (id, member_id, order_id, course_id, business_type, pack_type, total_sessions, used_sessions, remaining_sessions, gift_sessions, unit_price, valid_from, valid_until, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'SESSION_PACK', ?, 0, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+          params: [extraPackId, memberId, '', extraGiftCourseId, extraGiftBusinessType, extraGiftSessions, extraGiftSessions, extraGiftSessions, extraUnitPrice, today, validUntil, now(), now()],
+        };
+      }
 
     } else if (chargeMode === 'MONTHLY') {
       // 月卡模式
       let quota = monthlyQuota;
       let fee = monthlyFee;
+      let extraGiftBusinessType = null;
+      let extraGiftSessions = 0;
+      let extraGiftCourseId = null;
       if (monthlyPricingId) {
         const mp = db.prepare('SELECT * FROM course_monthly_pricing WHERE id = ? AND status = ?').get(monthlyPricingId, 'ACTIVE');
         if (!mp) throw new BizError('月卡档位不存在');
         fee = mp.monthly_fee;
         quota = mp.monthly_quota;
+        // 额外赠送（跨业务类型，生成次卡课包）
+        extraGiftBusinessType = mp.extra_gift_business_type || null;
+        extraGiftSessions = mp.extra_gift_sessions || 0;
+        if (extraGiftBusinessType && extraGiftSessions > 0) {
+          const extraCourse = db.prepare("SELECT * FROM courses WHERE business_type = ? AND status = 'ACTIVE' ORDER BY created_at LIMIT 1").get(extraGiftBusinessType);
+          extraGiftCourseId = extraCourse?.id || null;
+          giftValue += extraGiftSessions * (extraCourse?.standard_price || 0);
+        }
       }
       if (!fee || !quota) throw new BizError('月费和月额度必填');
       amount = fee;
@@ -160,7 +160,7 @@ export function createOrder(data, operator) {
       const today = formatDate();
       const validUntil = addMonths(today, 1);
       const month = currentMonth();
-      orderDetail = { monthlyFee: fee, monthlyQuota: quota, validFrom: today, validUntil, month };
+      orderDetail = { monthlyFee: fee, monthlyQuota: quota, validFrom: today, validUntil, month, extraGiftBusinessType, extraGiftSessions };
 
       const disc = calculateBestDiscount({ businessType, courseId, amount, isNew, db });
       amount = disc.finalAmount;
@@ -170,6 +170,16 @@ export function createOrder(data, operator) {
         sql: `INSERT INTO packs (id, member_id, order_id, course_id, business_type, pack_type, monthly_quota, monthly_used, monthly_remaining, monthly_period, valid_from, valid_until, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'MONTHLY', ?, 0, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
         params: [packId, memberId, '', courseId || null, businessType, quota, quota, month, today, validUntil, now(), now()],
       };
+      // 额外赠送课包（跨业务类型，以次卡形式发放）
+      if (extraGiftBusinessType && extraGiftSessions > 0) {
+        const extraPackId = uuid();
+        const extraUnitPrice = db.prepare("SELECT standard_price FROM courses WHERE business_type = ? AND status = 'ACTIVE' ORDER BY created_at LIMIT 1").get(extraGiftBusinessType)?.standard_price || 0;
+        const extraValidUntil = addDays(today, DEFAULTS.SESSION_PACK_VALIDITY_DAYS);
+        extraPackInsert = {
+          sql: `INSERT INTO packs (id, member_id, order_id, course_id, business_type, pack_type, total_sessions, used_sessions, remaining_sessions, gift_sessions, unit_price, valid_from, valid_until, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'SESSION_PACK', ?, 0, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+          params: [extraPackId, memberId, '', extraGiftCourseId, extraGiftBusinessType, extraGiftSessions, extraGiftSessions, extraGiftSessions, extraUnitPrice, today, extraValidUntil, now(), now()],
+        };
+      }
 
     } else if (chargeMode === 'SINGLE') {
       // 群活动单次付费
@@ -193,35 +203,19 @@ export function createOrder(data, operator) {
         businessType, courseId || null, chargeMode, amount, originalAmount, originalAmount - amount, giftValue,
         commissionType, commissionRate, commissionAmount, data.note || null, now(), now());
 
-    // 预存模式：入账预存账户（订单创建后）
-    if (chargeMode === 'PREPAID') {
-      let account = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(memberId);
-      if (!account) {
-        account = { id: uuid(), member_id: memberId, principal_balance: 0, gift_balance: 0, total_balance: 0 };
-        db.prepare(`INSERT INTO prepaid_accounts (id, member_id, principal_balance, gift_balance, total_balance) VALUES (?, ?, 0, 0, 0)`)
-          .run(account.id, memberId);
-      }
-      const newPrincipal = account.principal_balance + depositAmount;
-      const newGift = account.gift_balance + giftValue;
-      const newTotal = newPrincipal + newGift;
-      db.prepare('UPDATE prepaid_accounts SET principal_balance = ?, gift_balance = ?, total_balance = ?, updated_at = ? WHERE id = ?')
-        .run(newPrincipal, newGift, newTotal, now(), account.id);
-      db.prepare(`INSERT INTO prepaid_transactions (id, account_id, member_id, order_id, type, principal_delta, gift_delta, amount, balance_after, created_at) VALUES (?, ?, ?, ?, 'DEPOSIT', ?, ?, ?, ?, ?)`)
-        .run(uuid(), account.id, memberId, orderId, depositAmount, giftValue, depositAmount + giftValue, newTotal, now());
-    }
-
     // 创建课包（订单创建后，回填 order_id）
     if (packInsert) {
       packInsert.params[2] = orderId; // 替换 order_id
       db.prepare(packInsert.sql).run(...packInsert.params);
     }
-
-    // 记录提成
-    if (commissionAmount > 0 && operator) {
-      db.prepare(`INSERT INTO commission_records (id, order_id, beneficiary_id, beneficiary_type, beneficiary_name, commission_type, business_type, rate, amount, status, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)`)
-        .run(uuid(), orderId, operator.id, operator.type, operator.name, commissionType, businessType, commissionRate, commissionAmount, now());
+    // 创建额外赠送课包（跨业务类型）
+    if (extraPackInsert) {
+      extraPackInsert.params[2] = orderId;
+      db.prepare(extraPackInsert.sql).run(...extraPackInsert.params);
     }
+
+    // 记录提成（改为课后计提，开单时不再记录销售提成，仅保留预估值在订单上）
+    // 销售提成在出勤时按节计提，见 attendance.js
 
     // 自动累积会员分类标签（MEM-009）
     autoAddTagOnPurchase(memberId, businessType, operator);
@@ -230,6 +224,7 @@ export function createOrder(data, operator) {
 
     return {
       orderId, orderNo, amount, originalAmount, commissionAmount, commissionRate, commissionType,
+      salesId: operator?.id || null, salesType: operator?.type || null, salesName: operator?.name || null,
       packId, detail: orderDetail,
     };
   })();
@@ -245,36 +240,58 @@ export function refundOrder(orderId, operator, reason) {
   return db.transaction(() => {
     let refundAmount = 0;
 
+    // 获取该订单关联的所有课包（主课包 + 附加赠送课包）
+    const allPacks = db.prepare('SELECT * FROM packs WHERE order_id = ?').all(orderId);
+
     if (order.charge_mode === 'SESSION_PACK') {
-      // 次卡：剩余节数 × 单次原价
-      const pack = db.prepare('SELECT * FROM packs WHERE order_id = ?').get(orderId);
-      if (pack && pack.status !== PACK_STATUS.REFUNDED) {
-        const remaining = pack.remaining_sessions;
-        // 退费不含赠送节数：剩余节数中先扣赠送
-        const refundableSessions = Math.max(0, remaining - pack.gift_sessions);
-        refundAmount = refundableSessions * pack.unit_price;
-        db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, pack.id);
+      // 次卡退款：退款金额 = 缴费金额 - 已消课节数 × 单次原价 - 附加赠送课已消课节数 × 对应课程单次原价
+      const mainPack = allPacks.find((p) => p.business_type === order.business_type && p.pack_type === 'SESSION_PACK');
+      const extraPacks = allPacks.filter((p) => p.business_type !== order.business_type);
+
+      // 主课包已消课价值
+      let mainConsumedValue = 0;
+      if (mainPack && mainPack.status !== PACK_STATUS.REFUNDED) {
+        mainConsumedValue = mainPack.used_sessions * mainPack.unit_price;
+        db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, mainPack.id);
       }
-    } else if (order.charge_mode === 'PREPAID') {
-      // 预存：按剩余本金退还
-      const account = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(order.member_id);
-      if (account) {
-        refundAmount = Math.min(account.principal_balance, order.amount);
-        const newPrincipal = account.principal_balance - refundAmount;
-        const newTotal = newPrincipal + account.gift_balance;
-        db.prepare('UPDATE prepaid_accounts SET principal_balance = ?, total_balance = ?, updated_at = ? WHERE id = ?')
-          .run(newPrincipal, newTotal, now(), account.id);
-        db.prepare(`INSERT INTO prepaid_transactions (id, account_id, member_id, type, principal_delta, gift_delta, amount, balance_after, created_at) VALUES (?, ?, ?, 'REFUND', ?, 0, ?, ?, ?)`)
-          .run(uuid(), account.id, order.member_id, -refundAmount, -refundAmount, newTotal, now());
+
+      // 附加赠送课：已消课部分扣减价值，未消课部分从会员卡包删除（标记REFUNDED）
+      let extraConsumedValue = 0;
+      for (const ep of extraPacks) {
+        if (ep.status === PACK_STATUS.REFUNDED) continue;
+        if (ep.used_sessions > 0) {
+          extraConsumedValue += ep.used_sessions * ep.unit_price;
+        }
+        db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, ep.id);
       }
+
+      refundAmount = Math.max(0, order.amount - mainConsumedValue - extraConsumedValue);
+
     } else if (order.charge_mode === 'MONTHLY') {
-      // 月卡：按剩余额度比例退
-      const pack = db.prepare('SELECT * FROM packs WHERE order_id = ?').get(orderId);
-      if (pack && pack.status !== PACK_STATUS.REFUNDED) {
-        const remainingRatio = pack.monthly_quota > 0 ? pack.monthly_remaining / pack.monthly_quota : 0;
-        refundAmount = Math.round(order.amount * remainingRatio);
-        db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, pack.id);
+      // 月卡退款：退款金额 = 缴费金额 - 已消课节数 × 单次原价 - 附加赠送课已消课节数 × 对应课程单次原价
+      const mainPack = allPacks.find((p) => p.business_type === order.business_type && p.pack_type === 'MONTHLY');
+      const extraPacks = allPacks.filter((p) => p.business_type !== order.business_type);
+
+      // 月卡单次原价 = 缴费金额 / 月额度
+      let mainConsumedValue = 0;
+      if (mainPack && mainPack.status !== PACK_STATUS.REFUNDED) {
+        const unitPrice = mainPack.monthly_quota > 0 ? Math.round(order.amount / mainPack.monthly_quota) : 0;
+        mainConsumedValue = mainPack.monthly_used * unitPrice;
+        db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, mainPack.id);
       }
+
+      // 附加赠送课
+      let extraConsumedValue = 0;
+      for (const ep of extraPacks) {
+        if (ep.status === PACK_STATUS.REFUNDED) continue;
+        if (ep.used_sessions > 0) {
+          extraConsumedValue += ep.used_sessions * ep.unit_price;
+        }
+        db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, ep.id);
+      }
+
+      refundAmount = Math.max(0, order.amount - mainConsumedValue - extraConsumedValue);
+
     } else if (order.charge_mode === 'SINGLE') {
       refundAmount = order.amount;
     }
@@ -283,8 +300,17 @@ export function refundOrder(orderId, operator, reason) {
     db.prepare('UPDATE orders SET status = ?, refund_amount = ?, updated_at = ? WHERE id = ?')
       .run(ORDER_STATUS.REFUNDED, refundAmount, now(), orderId);
 
-    // 回滚提成
+    // 回滚提成（退费不分成：回滚该订单所有已计提的销售提成）
     db.prepare("UPDATE commission_records SET status = 'REVERSED' WHERE order_id = ?").run(orderId);
+
+    // 回滚教练课时费/分成（退款后不再计入教练收入）
+    // 通过该订单课包关联的出勤记录，将课时费和分成置零
+    const packIds = allPacks.map((p) => p.id).filter(Boolean);
+    if (packIds.length > 0) {
+      const placeholders = packIds.map(() => '?').join(',');
+      db.prepare(`UPDATE attendance SET lesson_fee = 0, share_amount = 0, note = COALESCE(note, '') || ' [已退款]', updated_at = ? WHERE pack_id IN (${placeholders}) AND status = 'PRESENT'`)
+        .run(now(), ...packIds);
+    }
 
     writeAudit({ entity: 'order', entityId: orderId, action: AUDIT_ACTIONS.REFUND, operator, detail: { refundAmount, reason } });
 
@@ -303,6 +329,10 @@ export function listOrders(query, user) {
   if (query.status) { where.push('o.status = ?'); params.push(query.status); }
   if (query.startDate) { where.push('o.created_at >= ?'); params.push(query.startDate); }
   if (query.endDate) { where.push('o.created_at <= ?'); params.push(query.endDate + ' 23:59:59'); }
+  if (query.keyword) {
+    where.push('(o.order_no LIKE ? OR m.name LIKE ?)');
+    params.push(`%${query.keyword}%`, `%${query.keyword}%`);
+  }
   // 销售/教练只看本人开单
   if (user.role === 'sales' || user.role === 'coach') {
     where.push('o.sales_id = ?');

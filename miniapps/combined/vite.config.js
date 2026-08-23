@@ -71,6 +71,7 @@ function rpxToVar() {
 }
 
 export default defineConfig({
+  base: '/hourui/h5/',
   plugins: [
     rpxToVar(),
     vue({

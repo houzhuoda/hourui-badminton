@@ -124,7 +124,7 @@ router.patch('/:id/status', authRole(['admin']), (req, res, next) => {
 });
 
 // 渠道获客统计（CHN-004）
-router.get('/stats/summary', authRole(['admin']), (req, res, next) => {
+router.get('/stats/summary', authRole(['admin', 'sales', 'coach']), (req, res, next) => {
   try {
     const db = getDb();
     const { startDate, endDate } = req.query;

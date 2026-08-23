@@ -3,59 +3,44 @@
     <view class="form">
       <view class="form-item">
         <text class="label">会员 *</text>
-        <view class="member-display" v-if="member">{{ member.name }} ({{ member.phone }} )</view>
-        <button v-else size="mini" @click="selectMember">选择会员</button>
+        <view v-if="member" class="member-display" @click="changeMember">
+          {{ member.name }} ({{ member.phone }})
+          <text class="member-change">更换</text>
+        </view>
+        <MemberSearch v-else placeholder="输入姓名或手机号搜索会员" @select="onMemberSelect" />
       </view>
 
       <view class="form-item">
         <text class="label">业务类型 *</text>
-        <picker :range="businessTypes" range-key="name" @change="onBusinessChange">
-          <view class="picker">{{ selectedBusinessName || '请选择' }}</view>
-        </picker>
+        <SpPicker v-model="form.businessType" :options="businessTypeOptions" title="选择业务类型" @change="onBusinessChange" />
       </view>
 
       <view class="form-item">
         <text class="label">课程</text>
-        <picker :range="filteredCourses" range-key="name" @change="onCourseChange">
-          <view class="picker">{{ selectedCourseName || '请选择' }}</view>
-        </picker>
+        <SpPicker v-model="form.courseId" :options="courseOptions" title="选择课程" @change="onCourseChange" />
       </view>
 
       <view class="form-item">
         <text class="label">收费模式 *</text>
-        <picker :range="chargeModes" range-key="name" @change="onChargeModeChange">
-          <view class="picker">{{ selectedChargeModeName || '请选择' }}</view>
-        </picker>
+        <SpPicker v-model="form.chargeMode" :options="chargeModeOptions" title="选择收费模式" @change="onChargeModeChange" />
       </view>
 
       <!-- 次卡档位 -->
       <view class="form-item" v-if="form.chargeMode === 'SESSION_PACK'">
         <text class="label">次卡档位 *</text>
-        <picker :range="sessionPricingOptions" range-key="label" @change="onSpChange">
-          <view class="picker">{{ selectedSpName || '请选择' }}</view>
-        </picker>
+        <SpPicker v-model="form.sessionPricingId" :options="sessionPricingOptions" label-key="label" value-key="id" title="选择次卡档位" @change="onSpChange" />
       </view>
 
       <!-- 月卡档位 -->
       <view class="form-item" v-if="form.chargeMode === 'MONTHLY'">
         <text class="label">月卡档位 *</text>
-        <picker :range="monthlyPricingOptions" range-key="label" @change="onMpChange">
-          <view class="picker">{{ selectedMpName || '请选择' }}</view>
-        </picker>
-      </view>
-
-      <!-- 预存金额 -->
-      <view class="form-item" v-if="form.chargeMode === 'PREPAID'">
-        <text class="label">预存金额 *</text>
-        <picker :range="prepaidOptions" range-key="label" @change="onPrepaidChange">
-          <view class="picker">{{ selectedPrepaidName || '请选择' }}</view>
-        </picker>
+        <SpPicker v-model="form.monthlyPricingId" :options="monthlyPricingOptions" label-key="label" value-key="id" title="选择月卡档位" @change="onMpChange" />
       </view>
 
       <!-- 单次价格 -->
       <view class="form-item" v-if="form.chargeMode === 'SINGLE'">
         <text class="label">单次价格 *</text>
-        <input class="input" v-model.number="form.singlePrice" type="digit" placeholder="价格" />
+        <input class="input" v-model.number="form.singlePrice" type="digit" placeholder="请输入价格" />
       </view>
     </view>
 
@@ -71,27 +56,23 @@
 <script>
 import { api } from '../../../api/index.js';
 import { BUSINESS_TYPES, CHARGE_MODES, businessTypeName, chargeModeName } from '../../../utils/constants.js';
+import SpPicker from '../../../components/SpPicker.vue';
+import MemberSearch from '../../../components/MemberSearch.vue';
 
 export default {
+  components: { SpPicker, MemberSearch },
   data() {
     return {
       memberId: '',
       member: null,
-      businessTypes: BUSINESS_TYPES,
-      chargeModes: CHARGE_MODES,
+      businessTypeOptions: BUSINESS_TYPES.map((b) => ({ code: b.code, name: b.name })),
+      chargeModeOptions: CHARGE_MODES.map((m) => ({ code: m.code, name: m.name })),
       courses: [],
-      filteredCourses: [],
+      courseOptions: [],
       courseDetail: null,
-      form: { businessType: '', courseId: '', chargeMode: '', sessionPricingId: '', monthlyPricingId: '', depositAmount: '', singlePrice: '' },
-      selectedBusinessName: '',
-      selectedCourseName: '',
-      selectedChargeModeName: '',
-      selectedSpName: '',
-      selectedMpName: '',
-      selectedPrepaidName: '',
+      form: { businessType: '', courseId: '', chargeMode: '', sessionPricingId: '', monthlyPricingId: '', singlePrice: '' },
       sessionPricingOptions: [],
       monthlyPricingOptions: [],
-      prepaidOptions: [],
       amount: 0,
       loading: false,
     };
@@ -113,58 +94,47 @@ export default {
     selectMember() {
       uni.navigateTo({ url: '/pages/sales/members/members?select=1' });
     },
-    onBusinessChange(e) {
-      const b = this.businessTypes[e.detail.value];
-      this.form.businessType = b.code;
-      this.selectedBusinessName = b.name;
-      this.filteredCourses = this.courses.filter((c) => c.business_type === b.code);
+    onMemberSelect(m) {
+      if (m) { this.memberId = m.id; this.member = m; }
+    },
+    changeMember() {
+      this.member = null; this.memberId = '';
+    },
+    onBusinessChange(val) {
+      this.courseOptions = this.courses.filter((c) => c.business_type === val).map((c) => ({ code: c.id, name: c.name }));
       this.form.courseId = '';
-      this.selectedCourseName = '';
       this.courseDetail = null;
-    },
-    async onCourseChange(e) {
-      const c = this.filteredCourses[e.detail.value];
-      this.form.courseId = c.id;
-      this.selectedCourseName = c.name;
-      try {
-        this.courseDetail = await api.courseDetail(c.id);
-        this.sessionPricingOptions = (this.courseDetail.sessionPricing || []).map((sp) => ({
-          label: `${sp.sessions}节${sp.gift_sessions ? '+赠' + sp.gift_sessions + '节' : ''} ￥${sp.price}`,
-          id: sp.id, price: sp.price,
-        }));
-        this.monthlyPricingOptions = (this.courseDetail.monthlyPricing || []).map((mp) => ({
-          label: `￥${mp.monthly_fee}/月 ${mp.monthly_quota}次`,
-          id: mp.id, fee: mp.monthly_fee,
-        }));
-        this.prepaidOptions = (this.courseDetail.prepaidRules || []).map((r) => ({
-          label: `预存￥${r.deposit_amount} 赠￥${r.gift_amount}`,
-          amount: r.deposit_amount,
-        }));
-      } catch (e) {}
-    },
-    onChargeModeChange(e) {
-      const m = this.chargeModes[e.detail.value];
-      this.form.chargeMode = m.code;
-      this.selectedChargeModeName = m.name;
       this.amount = 0;
     },
-    onSpChange(e) {
-      const sp = this.sessionPricingOptions[e.detail.value];
-      this.form.sessionPricingId = sp.id;
-      this.selectedSpName = sp.label;
-      this.amount = sp.price;
+    async onCourseChange(val) {
+      try {
+        this.courseDetail = await api.courseDetail(val);
+        this.sessionPricingOptions = (this.courseDetail.sessionPricing || []).map((sp) => {
+          let label = `${sp.sessions}节${sp.gift_sessions ? '+赠' + sp.gift_sessions + '节' : ''} ￥${sp.price}`;
+          if (sp.extra_gift_business_type && sp.extra_gift_sessions) {
+            const btName = businessTypeName(sp.extra_gift_business_type);
+            label += ` 再赠${btName}${sp.extra_gift_sessions}节`;
+          }
+          return { label, id: sp.id, price: sp.price };
+        });
+        this.monthlyPricingOptions = (this.courseDetail.monthlyPricing || []).map((mp) => {
+          let label = `￥${mp.monthly_fee}/月 ${mp.monthly_quota}次`;
+          if (mp.extra_gift_business_type && mp.extra_gift_sessions) {
+            const btName = businessTypeName(mp.extra_gift_business_type);
+            label += ` 再赠${btName}${mp.extra_gift_sessions}节`;
+          }
+          return { label, id: mp.id, fee: mp.monthly_fee };
+        });
+      } catch (e) {}
     },
-    onMpChange(e) {
-      const mp = this.monthlyPricingOptions[e.detail.value];
-      this.form.monthlyPricingId = mp.id;
-      this.selectedMpName = mp.label;
-      this.amount = mp.fee;
+    onChargeModeChange() {
+      this.amount = 0;
     },
-    onPrepaidChange(e) {
-      const p = this.prepaidOptions[e.detail.value];
-      this.form.depositAmount = p.amount;
-      this.selectedPrepaidName = p.label;
-      this.amount = p.amount;
+    onSpChange(val, item) {
+      this.amount = item.price;
+    },
+    onMpChange(val, item) {
+      this.amount = item.fee;
     },
     async handleSubmit() {
       if (!this.memberId) { uni.showToast({ title: '请选择会员', icon: 'none' }); return; }
@@ -179,7 +149,9 @@ export default {
           showCancel: false,
           success: () => uni.navigateBack(),
         });
-      } catch (e) {}
+      } catch (e) {
+        uni.showToast({ title: e.message || '开单失败', icon: 'none' });
+      }
       this.loading = false;
     },
   },
@@ -190,10 +162,10 @@ export default {
 .page { padding: 20rpx; }
 .form { background: #fff; border-radius: 16rpx; padding: 20rpx; }
 .form-item { margin-bottom: 24rpx; }
-.label { font-size: 28rpx; color: #333; margin-bottom: 10rpx; display: block; }
+.form-item .label { font-size: 28rpx; color: #333; margin-bottom: 10rpx; display: block; }
 .input { height: 80rpx; border: 1rpx solid #ddd; border-radius: 10rpx; padding: 0 20rpx; font-size: 28rpx; }
-.picker { height: 80rpx; line-height: 80rpx; border: 1rpx solid #ddd; border-radius: 10rpx; padding: 0 20rpx; font-size: 28rpx; color: #666; }
-.member-display { font-size: 28rpx; padding: 20rpx; background: #f0f8ff; border-radius: 10rpx; }
+.member-display { font-size: 28rpx; padding: 20rpx; background: #f0f8ff; border-radius: 10rpx; display: flex; justify-content: space-between; align-items: center; }
+.member-change { color: #1890ff; font-size: 26rpx; }
 .summary { display: flex; justify-content: space-between; align-items: center; background: #fff; border-radius: 16rpx; padding: 30rpx; margin-top: 20rpx; }
 .summary-label { font-size: 30rpx; }
 .summary-amount { font-size: 40rpx; color: #1890ff; font-weight: bold; }

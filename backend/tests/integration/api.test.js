@@ -122,14 +122,6 @@ describe('订单 API 全流程', () => {
     packId = res.body.data.packId;
   });
 
-  it('预存开单', async () => {
-    const res = await request(app).post('/api/orders')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ memberId, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true });
-    expect(res.status).toBe(201);
-    expect(res.body.data.amount).toBe(5000);
-  });
-
   it('订单列表', async () => {
     const res = await request(app).get('/api/orders?memberId=' + memberId)
       .set('Authorization', `Bearer ${adminToken}`);

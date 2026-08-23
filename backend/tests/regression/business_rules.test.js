@@ -52,33 +52,9 @@ describe('REG-001: 次卡有效期 1 年', () => {
   });
 });
 
-// REG-002: 预存扣费顺序：先本金后赠送（Q-01）
-describe('REG-002: 预存扣费顺序', () => {
-  it('应先扣本金', () => {
-    const member = createMember({ name: '扣费顺序', phone: '13900005002', categoryCode: 'M_PRIVATE' }, operator);
-    const course = getCourse('PRIVATE');
-    const coach = getCoach();
-
-    createOrder({ memberId: member.id, businessType: 'PRIVATE', chargeMode: 'PREPAID', depositAmount: 5000, confirmed: true }, operator);
-
-    const session = createSession({
-      courseId: course.id, coachId: coach.id, date: '2026-12-01',
-      startTime: '10:00', endTime: '11:00', capacity: 1, participantIds: [member.id],
-    }, operator);
-
-    submitAttendance(session.id, [{ memberId: member.id, status: 'PRESENT' }], operator);
-
-    const db = getDb();
-    const account = db.prepare('SELECT * FROM prepaid_accounts WHERE member_id = ?').get(member.id);
-    // 课程单价 300，先扣本金
-    expect(account.principal_balance).toBe(4700);
-    expect(account.gift_balance).toBe(2000);
-  });
-});
-
 // REG-003: 退费规则（Q-10）
 describe('REG-003: 退费规则', () => {
-  it('次卡退费 = 剩余节数 × 单次原价（赠送不退）', () => {
+  it('次卡退费 = 缴费金额 - 已消课节数 × 单次原价', () => {
     const member = createMember({ name: '退费规则', phone: '13900005003', categoryCode: 'M_PRIVATE' }, operator);
     const course = getCourse('PRIVATE');
     const sp = getSessionPricing(course.id);
@@ -98,13 +74,11 @@ describe('REG-003: 退费规则', () => {
       submitAttendance(session.id, [{ memberId: member.id, status: 'PRESENT' }], operator);
     }
 
-    // 退款
+    // 退款：退款金额 = 缴费金额 - 已消课节数 × 单次原价
     const result = refundOrder(order.orderId, operator, '退费测试');
     const db = getDb();
     const pack = db.prepare('SELECT * FROM packs WHERE order_id = ?').get(order.orderId);
-    // 剩余节数 = 总 - 已用 - 赠送 = (sessions + gift) - 3 - gift = sessions - 3
-    const refundableSessions = pack.total_sessions - pack.used_sessions - pack.gift_sessions;
-    const expectedRefund = refundableSessions * pack.unit_price;
+    const expectedRefund = order.amount - pack.used_sessions * pack.unit_price;
     expect(result.refundAmount).toBe(expectedRefund);
   });
 });

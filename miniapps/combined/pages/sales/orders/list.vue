@@ -1,18 +1,21 @@
 <template>
-  <view class="page">
-    <view v-if="list.length === 0" class="empty">暂无订单</view>
-    <view v-for="o in list" :key="o.id" class="order-card">
-      <view class="order-header">
-        <text class="order-no">{{ o.order_no }}</text>
-        <text class="order-status" :class="o.status">{{ statusName(o.status) }}</text>
-      </view>
-      <view class="order-body">
-        <text class="order-member">{{ o.member_name }}</text>
-        <text class="order-type">{{ businessName(o.business_type) }} · {{ chargeName(o.charge_mode) }}</text>
-      </view>
-      <view class="order-footer">
-        <text class="order-time">{{ formatTime(o.created_at) }}</text>
-        <text class="order-amount">￥{{ o.amount }}</text>
+  <view class="olist-page">
+    <view v-if="list.length === 0" class="olist-empty">暂无订单</view>
+    <view v-for="o in list" :key="o.id" class="olist-order-card" :class="'olist-accent-' + (o.status === 'PAID' ? 'green' : o.status === 'REFUNDED' ? 'red' : 'amber')">
+      <view class="olist-accent-bar"></view>
+      <view class="olist-card-body">
+        <view class="olist-order-header">
+          <text class="olist-order-no">{{ o.order_no }}</text>
+          <text class="olist-order-status" :class="'olist-status-' + o.status">{{ statusName(o.status) }}</text>
+        </view>
+        <view class="olist-order-body">
+          <text class="olist-order-member">{{ o.member_name }}</text>
+          <text class="olist-order-type">{{ businessName(o.business_type) }} · {{ chargeName(o.charge_mode) }}</text>
+        </view>
+        <view class="olist-order-footer">
+          <text class="olist-order-time">{{ formatTime(o.created_at) }}</text>
+          <text class="olist-order-amount">￥{{ o.amount }}</text>
+        </view>
       </view>
     </view>
   </view>
@@ -43,18 +46,116 @@ export default {
 </script>
 
 <style scoped>
-.page { padding: 20rpx; }
-.empty { text-align: center; color: #999; padding: 80rpx; }
-.order-card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 16rpx; }
-.order-header { display: flex; justify-content: space-between; margin-bottom: 12rpx; }
-.order-no { font-size: 24rpx; color: #999; }
-.order-status { font-size: 24rpx; }
-.order-status.PAID { color: #52c41a; }
-.order-status.REFUNDED { color: #ff4d4f; }
-.order-body { margin-bottom: 12rpx; }
-.order-member { font-size: 30rpx; font-weight: bold; }
-.order-type { display: block; font-size: 24rpx; color: #666; margin-top: 6rpx; }
-.order-footer { display: flex; justify-content: space-between; align-items: center; }
-.order-time { font-size: 22rpx; color: #999; }
-.order-amount { font-size: 34rpx; color: #1890ff; font-weight: bold; }
+.olist-page {
+  min-height: 100vh;
+  background: var(--sp-bg, #F0F2F5);
+  padding: 32rpx;
+  box-sizing: border-box;
+}
+
+/* Empty state */
+.olist-empty {
+  text-align: center;
+  color: var(--text-sec, #6B7280);
+  font-size: 28rpx;
+  padding: 80rpx 0;
+}
+
+/* Order cards with left colored accent bar */
+.olist-order-card {
+  background: var(--card, #FFFFFF);
+  border-radius: 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: var(--sp-shadow, 0 8rpx 28rpx rgba(15, 23, 42, 0.10));
+  display: flex;
+  overflow: hidden;
+  transition: transform 0.2s;
+}
+.olist-order-card:active {
+  transform: scale(0.97);
+}
+
+/* Left accent bar by status */
+.olist-accent-bar {
+  width: 8rpx;
+  flex-shrink: 0;
+}
+.olist-accent-green .olist-accent-bar {
+  background: var(--sp-green, #10B981);
+}
+.olist-accent-amber .olist-accent-bar {
+  background: var(--sp-amber, #F59E0B);
+}
+.olist-accent-red .olist-accent-bar {
+  background: var(--sp-red, #EF4444);
+}
+
+.olist-card-body {
+  flex: 1;
+  padding: 28rpx 24rpx;
+}
+
+/* Order header */
+.olist-order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+.olist-order-no {
+  font-size: 24rpx;
+  color: var(--text-sec, #6B7280);
+}
+
+/* Status badges as pills */
+.olist-order-status {
+  font-size: 22rpx;
+  padding: 6rpx 20rpx;
+  border-radius: 100rpx;
+  font-weight: 600;
+}
+.olist-status-PAID {
+  color: var(--sp-green, #10B981);
+  background: rgba(16, 185, 129, 0.1);
+}
+.olist-status-REFUNDED {
+  color: var(--sp-red, #EF4444);
+  background: rgba(239, 68, 68, 0.1);
+}
+.olist-status-PARTIAL_REFUND {
+  color: var(--sp-amber, #F59E0B);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+/* Order body */
+.olist-order-body {
+  margin-bottom: 16rpx;
+}
+.olist-order-member {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--text, #0F172A);
+}
+.olist-order-type {
+  display: block;
+  font-size: 24rpx;
+  color: var(--text-sec, #6B7280);
+  margin-top: 6rpx;
+}
+
+/* Order footer */
+.olist-order-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.olist-order-time {
+  font-size: 22rpx;
+  color: var(--text-sec, #6B7280);
+}
+.olist-order-amount {
+  font-size: 36rpx;
+  color: var(--sp-orange, #FF4D28);
+  font-weight: 700;
+}
 </style>
