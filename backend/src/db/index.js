@@ -206,6 +206,17 @@ export function initDb(dbPath) {
     dbInstance.exec("ALTER TABLE orders ADD COLUMN commission_status TEXT DEFAULT 'ACTIVE'");
   }
 
+  // 迁移：修复历史退款订单的 commission_amount（DA-04）
+  // 修复前的退款订单 commission_records 已 REVERSED 但 orders.commission_amount 未清零
+  try {
+    const fixed = dbInstance.prepare("UPDATE orders SET commission_amount = 0, commission_status = 'REVERSED' WHERE status = 'REFUNDED' AND commission_status = 'ACTIVE'").run();
+    if (fixed.changes > 0) {
+      console.log(`[db] DA-04 修复：已清零 ${fixed.changes} 笔历史退款订单的 commission_amount`);
+    }
+  } catch (e) {
+    console.error('[db] DA-04 历史退款修复失败:', e.message);
+  }
+
   // 迁移：phone_hash 算法升级为 HMAC-SHA256（P3-9）
   // 旧算法: SHA256(phone + key)，新算法: HMAC-SHA256(phone, key)
   // 需要重新计算所有会员的 phone_hash
