@@ -239,6 +239,8 @@ export function refundOrder(orderId, operator, reason) {
 
   return db.transaction(() => {
     let refundAmount = 0;
+    let mainConsumedValue = 0;
+    let extraConsumedValue = 0;
 
     // 获取该订单关联的所有课包（主课包 + 附加赠送课包）
     const allPacks = db.prepare('SELECT * FROM packs WHERE order_id = ?').all(orderId);
@@ -249,14 +251,12 @@ export function refundOrder(orderId, operator, reason) {
       const extraPacks = allPacks.filter((p) => p.business_type !== order.business_type);
 
       // 主课包已消课价值
-      let mainConsumedValue = 0;
       if (mainPack && mainPack.status !== PACK_STATUS.REFUNDED) {
         mainConsumedValue = mainPack.used_sessions * mainPack.unit_price;
         db.prepare('UPDATE packs SET status = ? WHERE id = ?').run(PACK_STATUS.REFUNDED, mainPack.id);
       }
 
       // 附加赠送课：已消课部分扣减价值，未消课部分从会员卡包删除（标记REFUNDED）
-      let extraConsumedValue = 0;
       for (const ep of extraPacks) {
         if (ep.status === PACK_STATUS.REFUNDED) continue;
         if (ep.used_sessions > 0) {
@@ -273,7 +273,6 @@ export function refundOrder(orderId, operator, reason) {
       const extraPacks = allPacks.filter((p) => p.business_type !== order.business_type);
 
       // 月卡单次原价 = 缴费金额 / 月额度
-      let mainConsumedValue = 0;
       if (mainPack && mainPack.status !== PACK_STATUS.REFUNDED) {
         const unitPrice = mainPack.monthly_quota > 0 ? Math.round(order.amount / mainPack.monthly_quota) : 0;
         mainConsumedValue = mainPack.monthly_used * unitPrice;
@@ -281,7 +280,6 @@ export function refundOrder(orderId, operator, reason) {
       }
 
       // 附加赠送课
-      let extraConsumedValue = 0;
       for (const ep of extraPacks) {
         if (ep.status === PACK_STATUS.REFUNDED) continue;
         if (ep.used_sessions > 0) {
@@ -296,9 +294,10 @@ export function refundOrder(orderId, operator, reason) {
       refundAmount = order.amount;
     }
 
-    // 更新订单
-    db.prepare('UPDATE orders SET status = ?, refund_amount = ?, updated_at = ? WHERE id = ?')
-      .run(ORDER_STATUS.REFUNDED, refundAmount, now(), orderId);
+    // 更新订单（P1修复：退款时清零 commission_amount 并标记 commission_status）
+    const consumedValue = (order.amount - refundAmount);
+    db.prepare('UPDATE orders SET status = ?, refund_amount = ?, commission_amount = 0, commission_status = ?, updated_at = ? WHERE id = ?')
+      .run(ORDER_STATUS.REFUNDED, refundAmount, 'REVERSED', now(), orderId);
 
     // 回滚提成（退费不分成：回滚该订单所有已计提的销售提成）
     db.prepare("UPDATE commission_records SET status = 'REVERSED' WHERE order_id = ?").run(orderId);
@@ -312,9 +311,10 @@ export function refundOrder(orderId, operator, reason) {
         .run(now(), ...packIds);
     }
 
-    writeAudit({ entity: 'order', entityId: orderId, action: AUDIT_ACTIONS.REFUND, operator, detail: { refundAmount, reason } });
+    writeAudit({ entity: 'order', entityId: orderId, action: AUDIT_ACTIONS.REFUND, operator, detail: { refundAmount, consumedValue, reason } });
 
-    return { refundAmount, orderId };
+    // P2-7修复：返回退款金额计算明细
+    return { refundAmount, consumedValue, orderId, detail: { mainConsumedValue: mainConsumedValue || 0, extraConsumedValue: extraConsumedValue || 0 } };
   })();
 }
 

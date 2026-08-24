@@ -45,12 +45,13 @@ if (config.env !== 'test') {
   app.use(morgan('dev'));
 }
 
-// 限流（登录接口更严格）
+// 限流（登录接口更严格，P3优化：缩短封锁窗口，成功登录不计数）
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
+  windowMs: 2 * 60 * 1000,  // 2 分钟窗口
+  max: 10,                   // 最多 10 次失败
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,  // 成功登录不消耗配额
 });
 app.use('/api/auth/login', loginLimiter);
 

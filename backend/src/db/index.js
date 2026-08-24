@@ -2,6 +2,7 @@
 import Database from 'better-sqlite3';
 import { config } from '../utils/config.js';
 import { SCHEMA_SQL } from './schema.js';
+import { hashPhone, decryptPhone } from '../utils/helpers.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -189,6 +190,54 @@ export function initDb(dbPath) {
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     dbInstance.exec('CREATE INDEX IF NOT EXISTS idx_payouts_beneficiary ON commission_payouts(beneficiary_id, beneficiary_type)');
+  }
+
+  // 迁移：为 admins 添加首次登录强制改密标记
+  try {
+    dbInstance.prepare('SELECT must_change_password FROM admins LIMIT 1').get();
+  } catch {
+    dbInstance.exec('ALTER TABLE admins ADD COLUMN must_change_password INTEGER DEFAULT 0');
+  }
+
+  // 迁移：为 orders 添加提成冲销状态字段
+  try {
+    dbInstance.prepare('SELECT commission_status FROM orders LIMIT 1').get();
+  } catch {
+    dbInstance.exec("ALTER TABLE orders ADD COLUMN commission_status TEXT DEFAULT 'ACTIVE'");
+  }
+
+  // 迁移：phone_hash 算法升级为 HMAC-SHA256（P3-9）
+  // 旧算法: SHA256(phone + key)，新算法: HMAC-SHA256(phone, key)
+  // 需要重新计算所有会员的 phone_hash
+  try {
+    // 检查是否需要重新哈希（用一个已知值验证算法是否已升级）
+    const sampleMember = dbInstance.prepare('SELECT phone, phone_hash FROM members LIMIT 1').get();
+    if (sampleMember) {
+      const decryptedPhone = decryptPhone(sampleMember.phone);
+      if (decryptedPhone && decryptedPhone.length === 11) {
+        const newHash = hashPhone(decryptedPhone);
+        if (newHash !== sampleMember.phone_hash) {
+          // 需要重新哈希所有会员
+          const allMembers = dbInstance.prepare('SELECT id, phone, phone_hash FROM members').all();
+          let rehashed = 0;
+          for (const m of allMembers) {
+            const phone = decryptPhone(m.phone);
+            if (phone && phone.length >= 11) {
+              const newH = hashPhone(phone);
+              if (newH !== m.phone_hash) {
+                dbInstance.prepare('UPDATE members SET phone_hash = ? WHERE id = ?').run(newH, m.id);
+                rehashed++;
+              }
+            }
+          }
+          if (rehashed > 0) {
+            console.log(`[db] phone_hash 算法升级：已重新哈希 ${rehashed} 条会员记录`);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[db] phone_hash 迁移失败:', e.message);
   }
 
   // 迁移：清理 attendance 表中的 ATTENDED 脏状态（应为 PRESENT）

@@ -20,7 +20,7 @@ router.post('/login', (req, res) => {
   }
   db.prepare('UPDATE admins SET last_login_at = ? WHERE id = ?').run(now(), admin.id);
   const token = signToken({ id: admin.id, role: 'admin', name: admin.name, username: admin.username });
-  res.json(success({ token, user: { id: admin.id, name: admin.name, role: 'admin', username: admin.username } }));
+  res.json(success({ token, user: { id: admin.id, name: admin.name, role: 'admin', username: admin.username }, mustChangePassword: !!admin.must_change_password }));
 });
 
 // 销售登录（手机号 + 密码）
@@ -89,11 +89,17 @@ router.post('/member/login', (req, res) => {
   res.json(success({ token, user: { id: member.id, name: member.name, role: 'member', memberId: member.id, phone: maskPhone(phone) } }));
 });
 
-// 模拟发送验证码（本期固定返回 1234）
+// 模拟发送验证码（本期固定验证码 1234，仅开发/测试环境返回明文）
 router.post('/member/send-code', (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json(fail('手机号必填'));
-  res.json(success({ sent: true, demoCode: '1234' }, '验证码已发送（模拟，验证码为 1234）'));
+  // P0安全修复：生产环境不返回 demoCode，防止认证绕过
+  const data = { sent: true };
+  if (config.env !== 'production') {
+    data.demoCode = '1234';
+  }
+  const msg = config.env !== 'production' ? '验证码已发送（模拟，验证码为 1234）' : '验证码已发送';
+  res.json(success(data, msg));
 });
 
 // 会员注册（手机号 + 验证码 + 密码 + 隐私协议同意）
@@ -170,7 +176,7 @@ router.post('/admin/change-password', authMiddleware, (req, res) => {
     if (!admin || !verifyPassword(oldPassword, admin.password_hash)) {
       return res.status(403).json(fail('旧密码错误', 403));
     }
-    db.prepare('UPDATE admins SET password_hash = ?, updated_at = ? WHERE id = ?').run(hashPassword(newPassword), now(), admin.id);
+    db.prepare('UPDATE admins SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?').run(hashPassword(newPassword), now(), admin.id);
     res.json(success({ ok: true }, '密码修改成功'));
   } catch (e) { res.status(500).json(fail(e.message || '服务器错误')); }
 });

@@ -115,7 +115,10 @@ export function removeTag(memberId, categoryCode, operator, reason) {
 export function listMembers(query) {
   const db = getDb();
   const { page, pageSize, offset } = parsePagination(query);
-  const where = [`m.status != 'DELETED'`];
+  // 默认排除已归档会员（软删除），除非显式查询 ARCHIVED 状态
+  const where = query.status === 'ARCHIVED'
+    ? [`m.status = 'ARCHIVED'`]
+    : [`m.status NOT IN ('DELETED', 'ARCHIVED')`];
   const params = [];
 
   if (query.keyword) {
@@ -302,6 +305,21 @@ export function setMemberStatus(id, status, operator) {
 export function getTagHistory(memberId) {
   const db = getDb();
   return db.prepare('SELECT * FROM member_tag_history WHERE member_id = ? ORDER BY created_at DESC').all(memberId);
+}
+
+// ============ 归档会员（软删除） ============
+export function archiveMember(id, operator) {
+  const db = getDb();
+  const m = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
+  if (!m) throw new BizError('会员不存在', 404);
+  if (m.status === 'ARCHIVED') throw new BizError('会员已归档');
+  db.prepare('UPDATE members SET status = ?, updated_at = ? WHERE id = ?').run('ARCHIVED', now(), id);
+  writeAudit({
+    entity: 'member', entityId: id,
+    action: AUDIT_ACTIONS.DELETE,
+    operator, detail: { action: 'ARCHIVE', name: m.name },
+  });
+  return getMemberDetail(id);
 }
 
 // ============ 审计日志查询 ============

@@ -38,8 +38,9 @@ export function maskPhone(phone) {
 }
 
 // 手机号 hash（用于唯一校验与查询，避免解密全表扫描）
+// P3安全加固：使用 HMAC-SHA256 + 服务端 pepper，防止彩虹表攻击
 export function hashPhone(phone) {
-  return crypto.createHash('sha256').update(phone + config.phoneEncryptKey).digest('hex');
+  return crypto.createHmac('sha256', config.phoneEncryptKey).update(phone).digest('hex');
 }
 
 // ============ 通用工具 ============

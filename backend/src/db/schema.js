@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS admins (
   name TEXT NOT NULL,
   role TEXT DEFAULT 'admin',
   status TEXT DEFAULT 'ACTIVE',
+  must_change_password INTEGER DEFAULT 0,  -- 首次登录强制改密标记 0/1
   last_login_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))

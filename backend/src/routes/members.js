@@ -6,7 +6,7 @@ import { getDb } from '../db/index.js';
 import { operatorFromReq } from '../services/audit.js';
 import {
   createMember, listMembers, getMemberDetail, updateMember,
-  setMemberStatus, addTag, removeTag, getTagHistory, getMemberAuditLogs,
+  setMemberStatus, addTag, removeTag, getTagHistory, getMemberAuditLogs, archiveMember,
 } from '../services/member.js';
 import { MEMBER_STATUS } from '../../../shared/constants.js';
 import { BizError } from '../middleware/error.js';
@@ -117,6 +117,14 @@ router.patch('/:id/status', authRole(['admin']), (req, res, next) => {
     if (!Object.values(MEMBER_STATUS).includes(status)) throw new BizError('无效状态');
     const member = setMemberStatus(req.params.id, status, operatorFromReq(req));
     res.json(success(member));
+  } catch (e) { next(e); }
+});
+
+// 归档会员（软删除，P2-5修复：提供数据生命周期管理）
+router.delete('/:id', authRole(['admin']), (req, res, next) => {
+  try {
+    const member = archiveMember(req.params.id, operatorFromReq(req));
+    res.json(success(member, '会员已归档'));
   } catch (e) { next(e); }
 });
 

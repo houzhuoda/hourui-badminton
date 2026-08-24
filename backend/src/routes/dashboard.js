@@ -33,8 +33,8 @@ router.get('/', authRole(['admin']), (req, res, next) => {
     // 本月收入
     const monthStart = formatDate().slice(0, 8) + '01';
     const monthIncome = db.prepare("SELECT COALESCE(SUM(amount),0) as total FROM orders WHERE status = 'PAID' AND created_at >= ?").get(monthStart + ' 00:00:00').total;
-    // 本月课消节数
-    const monthConsumption = db.prepare("SELECT COUNT(*) as cnt FROM attendance WHERE status = 'PRESENT' AND date(created_at) >= ?").get(monthStart).cnt;
+    // 本月课消节数（P1修复：统一使用 pack_consumptions 表，避免与 attendance 统计口径不一致）
+    const monthConsumption = db.prepare("SELECT COUNT(*) as cnt FROM pack_consumptions WHERE date(created_at) >= ?").get(monthStart).cnt;
     // 待消课节数 = 次卡剩余节数 + 月卡剩余次数（有效课包）
     const pendingConsumption = db.prepare(`
       SELECT COALESCE(SUM(
@@ -68,8 +68,8 @@ router.get('/', authRole(['admin']), (req, res, next) => {
         EXISTS (SELECT 1 FROM packs p WHERE p.member_id = m.id AND p.status = 'ACTIVE' AND p.valid_until >= date('now'))
       )
     `).get().cnt;
-    // 本月新增会员
-    const newMembers = db.prepare("SELECT COUNT(*) as cnt FROM members WHERE created_at >= ?").get(monthStart + ' 00:00:00').cnt;
+    // 本月新增会员（P2修复：排除已归档会员）
+    const newMembers = db.prepare("SELECT COUNT(*) as cnt FROM members WHERE created_at >= ? AND status != 'ARCHIVED'").get(monthStart + ' 00:00:00').cnt;
     // 本月到期会员
     const expiringMembers = db.prepare(`
       SELECT COUNT(DISTINCT p.member_id) as cnt FROM packs p
@@ -162,22 +162,21 @@ router.get('/detail', authRole(['admin']), (req, res, next) => {
       ];
     } else if (type === 'monthConsumption') {
       rows = db.prepare(`
-        SELECT a.id, m.name as member_name, c.name as course_name, co.name as coach_name,
-               a.lesson_fee, a.share_amount, a.status, a.created_at
-        FROM attendance a
-        LEFT JOIN members m ON a.member_id = m.id
-        LEFT JOIN sessions s ON a.session_id = s.id
+        SELECT pc.id, m.name as member_name, c.name as course_name,
+               pc.sessions_used, pc.charge_mode, pc.created_at,
+               s.date as session_date, s.start_time
+        FROM pack_consumptions pc
+        LEFT JOIN members m ON pc.member_id = m.id
+        LEFT JOIN sessions s ON pc.session_id = s.id
         LEFT JOIN courses c ON s.course_id = c.id
-        LEFT JOIN coaches co ON a.coach_id = co.id
-        WHERE a.status = 'PRESENT' AND date(a.created_at) >= ?
-        ORDER BY a.created_at DESC
+        WHERE date(pc.created_at) >= ?
+        ORDER BY pc.created_at DESC
       `).all(monthStart);
       columns = [
         { title: '会员', dataIndex: 'member_name', key: 'member_name' },
         { title: '课程', dataIndex: 'course_name', key: 'course_name' },
-        { title: '教练', dataIndex: 'coach_name', key: 'coach_name' },
-        { title: '课时费', dataIndex: 'lesson_fee', key: 'lesson_fee', render: (v) => v ? `￥${v}` : '-' },
-        { title: '分成', dataIndex: 'share_amount', key: 'share_amount', render: (v) => v ? `￥${v}` : '-' },
+        { title: '扣减节数', dataIndex: 'sessions_used', key: 'sessions_used' },
+        { title: '收费模式', dataIndex: 'charge_mode', key: 'charge_mode' },
         { title: '时间', dataIndex: 'created_at', key: 'created_at' },
       ];
     } else if (type === 'consumedAmount') {

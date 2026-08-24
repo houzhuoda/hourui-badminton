@@ -18,9 +18,9 @@ export function seed(db) {
   db.prepare(`INSERT OR IGNORE INTO courts (id, venue_id, name, business_type, status) VALUES (?, ?, ?, NULL, 'ACTIVE')`).run(court2, venueId, '2号场');
   db.prepare(`INSERT OR IGNORE INTO courts (id, venue_id, name, business_type, status) VALUES (?, ?, ?, 'GYM', 'ACTIVE')`).run(courtGym, venueId, '健身区');
 
-  // 默认管理员
+  // 默认管理员（首次登录强制改密）
   const adminId = uuid();
-  db.prepare(`INSERT OR IGNORE INTO admins (id, username, password_hash, name, role, status) VALUES (?, ?, ?, ?, 'admin', 'ACTIVE')`)
+  db.prepare(`INSERT OR IGNORE INTO admins (id, username, password_hash, name, role, status, must_change_password) VALUES (?, ?, ?, ?, 'admin', 'ACTIVE', 1)`)
     .run(adminId, config.defaultAdmin.username, hashPassword(config.defaultAdmin.password), config.defaultAdmin.name);
 
   // 默认销售

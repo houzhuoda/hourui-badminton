@@ -65,6 +65,7 @@ export const GENDERS = [
 export const MEMBER_STATUS = {
   ACTIVE: 'ACTIVE',     // 正常
   DISABLED: 'DISABLED', // 停用
+  ARCHIVED: 'ARCHIVED', // 已归档（软删除）
 };
 
 // ============ 订单状态 ============
