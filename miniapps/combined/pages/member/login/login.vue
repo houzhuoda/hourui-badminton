@@ -33,8 +33,10 @@ export default {
       if (!/^\d{11}$/.test(this.phone)) { uni.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
       try {
         const d = await api.sendCode({ phone: this.phone });
-        uni.showToast({ title: `验证码: ${d.demoCode}`, icon: 'none' });
-        this.code = d.demoCode || '';
+        // 模拟登录：生产环境不返回 demoCode，使用固定验证码 1234
+        const code = d.demoCode || '1234';
+        uni.showToast({ title: `验证码: ${code}`, icon: 'none' });
+        this.code = code;
       } catch (e) {}
       this.countdown = 60;
       this.timer = setInterval(() => { this.countdown--; if (this.countdown <= 0) clearInterval(this.timer); }, 1000);
