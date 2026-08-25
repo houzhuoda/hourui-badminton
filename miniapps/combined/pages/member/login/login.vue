@@ -54,7 +54,9 @@ export default {
         const app = getApp();
         if (app && app.globalData) { app.globalData.token = d.token; app.globalData.user = d.user; app.globalData.role = this.role; }
         uni.reLaunch({ url: '/pages/member/assets/assets' });
-      } catch (e) {}
+      } catch (e) {
+        uni.showToast({ title: e.message || '登录失败，请检查手机号是否已建档', icon: 'none', duration: 3000 });
+      }
       this.loading = false;
     },
   },
