@@ -180,8 +180,9 @@ router.get('/:coachId/available-slots', authRole(['admin', 'coach', 'member']), 
       ? filtered3.filter((s) => parseInt(s.start_time.split(':')[0]) > nowHour)
       : filtered3;
 
-    // 标记是否可约
-    const result = filtered4.map((s) => ({ ...s, available: true }));
+    // 标记是否可约，并按开始时间排序
+    const result = filtered4.map((s) => ({ ...s, available: true }))
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
     res.json(success(result));
   } catch (e) { next(e); }
 });
