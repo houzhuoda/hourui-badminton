@@ -102,12 +102,11 @@ router.post('/member/send-code', (req, res) => {
   res.json(success(data, msg));
 });
 
-// 会员注册（手机号 + 验证码 + 密码 + 隐私协议同意）
+// 会员注册（手机号 + 密码 + 隐私协议同意，无需短信验证码）
 router.post('/member/register', (req, res) => {
-  const { phone, code, password, name, agreedPrivacy } = req.body || {};
-  if (!phone || !code || !password) return res.status(400).json(fail('手机号、验证码、密码必填'));
+  const { phone, password, name, agreedPrivacy } = req.body || {};
+  if (!phone || !password) return res.status(400).json(fail('手机号、密码必填'));
   if (!/^\d{11}$/.test(phone)) return res.status(400).json(fail('手机号格式错误'));
-  if (!/^\d{4,6}$/.test(code)) return res.status(400).json(fail('验证码格式错误'));
   if (password.length < 6) return res.status(400).json(fail('密码至少6位'));
   if (!agreedPrivacy) return res.status(400).json(fail('请先同意用户隐私协议和场馆锻炼安全免责说明'));
   const db = getDb();
